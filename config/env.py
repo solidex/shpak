@@ -119,11 +119,30 @@ class _Settings:
     MHE_FORTIAPI_HOST = _get("MHE_FORTIAPI_HOST", "127.0.0.1")
     MHE_FORTIAPI_PORT = _get("MHE_FORTIAPI_PORT", 80, int)
 
+    MHE_LDAP_HOST = _get("MHE_LDAP_HOST", "127.0.0.1")
+    MHE_LDAP_PORT = _get("MHE_LDAP_PORT", 8086, int)
+
+    MHE_EMAIL_HOST = _get("MHE_EMAIL_HOST", "127.0.0.1")
+    MHE_EMAIL_PORT = _get("MHE_EMAIL_PORT", 8087, int)
+
     GUI_HOST = _get("GUI_HOST", "127.0.0.1")
     GUI_PORT = _get("GUI_PORT", 80, int)
 
     LOGGING_SERVICE_HOST = _get("LOGGING_SERVICE_HOST", "127.0.0.1")
     LOGGING_SERVICE_PORT = _get("LOGGING_SERVICE_PORT", 80, int)
+
+    # SMTP settings
+    SMTP_HOST = _get("SMTP_HOST", "localhost")
+    SMTP_PORT = _get("SMTP_PORT", 587, int)
+    SMTP_USER = _get("SMTP_USER", "")
+    SMTP_PASSWORD = _get("SMTP_PASSWORD", "")
+    SMTP_USE_TLS = _get("SMTP_USE_TLS", "True").lower() in ("true", "1", "yes")
+    SMTP_FROM = _get("SMTP_FROM", "noreply@example.com")
+    SMTP_USE_SSL = _get("SMTP_USE_SSL", "False").lower() in ("true", "1", "yes")
+    SMTP_TIMEOUT = _get("SMTP_TIMEOUT", 10, int)
+    
+    # Email report schedule (HH:MM format, 24-hour)
+    REPORT_SEND_TIME = _get("REPORT_SEND_TIME", "09:00")
 
 # Export a singleton compatible with previous `start_settings as st`
 st = _Settings()
