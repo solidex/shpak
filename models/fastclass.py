@@ -5,10 +5,7 @@ import orjson
 
 class PrettyJSONResponse(JSONResponse):
     def render(self, content: Any) -> bytes:
-        return orjson.dumps(
-            content,
-            option=orjson.OPT_INDENT_2,
-        )
+        return orjson.dumps(content, option=orjson.OPT_INDENT_2)
 
 class CreateProfileRequest(BaseModel):
     name: str
@@ -41,31 +38,22 @@ class PaginatedResponse(BaseModel):
     results: List[dict]
 
 class FirewallProfilePagination:
-    """Helper class for pagination logic (works with list of dicts)"""
+    """Simple pagination logic for a list of dicts."""
     def __init__(self, items: List[dict], page_size: int = 25):
         self.items = items
         self.page_size = page_size
-    
-    def paginate(self, page_number: int = 1) -> PaginatedResponse:
-        total_items = len(self.items)
-        num_pages = -(-total_items // self.page_size)  # Ceiling division
-        start_idx = (page_number - 1) * self.page_size
-        end_idx = start_idx + self.page_size
-        paginated_items = self.items[start_idx:end_idx]
+
+    def paginate(self, page: int = 1) -> PaginatedResponse:
+        total = len(self.items)
+        num_pages = (total + self.page_size - 1) // self.page_size
+        start = (page - 1) * self.page_size
+        end = start + self.page_size
         return PaginatedResponse(
-            count=total_items,
-            next=self._get_next_url(page_number, num_pages),
-            previous=self._get_previous_url(page_number),
-            current_page=page_number,
+            count=total,
+            next=f"/api/firewall_profile_rules?page={page+1}" if page < num_pages else None,
+            previous=f"/api/firewall_profile_rules?page={page-1}" if page > 1 else None,
+            current_page=page,
             num_pages=num_pages,
             page_size=self.page_size,
-            results=paginated_items
+            results=self.items[start:end]
         )
-    def _get_next_url(self, current_page: int, total_pages: int) -> Optional[str]:
-        if current_page < total_pages:
-            return f"/api/firewall_profile_rules?page={current_page + 1}"
-        return None
-    def _get_previous_url(self, current_page: int) -> Optional[str]:
-        if current_page > 1:
-            return f"/api/firewall_profile_rules?page={current_page - 1}"
-        return None
