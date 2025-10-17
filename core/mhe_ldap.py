@@ -1,71 +1,36 @@
 import logging
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
-from typing import Dict, List, Optional
-
 from fastapi import FastAPI, Body
-from fastapi.responses import JSONResponse
 
 try:
     from ldap3 import Server, Connection, ALL
-except Exception:  # optional dependency
-    Server = None  # type: ignore
-    Connection = None  # type: ignore
+except ImportError:
+    Server = Connection = None
 
-
-def setup_logging() -> None:
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
-    handler = RotatingFileHandler(log_dir / "mhe_ldap.log", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8")
-    handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
-    logging.basicConfig(level=logging.INFO, handlers=[handler])
-
-
-setup_logging()
-logger = logging.getLogger(__name__)
-
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("mhe_ldap")
 app = FastAPI(title="MHE LDAP Service")
 
 
-def ldap_lookup(logins: List[str], server_uri: Optional[str], bind_dn: Optional[str], bind_pw: Optional[str], base_dn: Optional[str]) -> Dict[str, List[str]]:
-    """Lookup emails for provided logins.
-
-    If ldap3 is unavailable or configuration is missing, returns an empty mapping.
-    """
-    result: Dict[str, List[str]] = {login: [] for login in logins}
-    if not server_uri or Server is None:
-        logger.warning("LDAP not configured or ldap3 missing; returning empty emails")
+def ldap_lookup(logins, server, bind_dn, bind_pw, base_dn):
+    """Very simple LDAP lookup for emails by login."""
+    result = {login: [] for login in logins}
+    if not (Server and server):
+        logger.warning("LDAP unavailable/config missing")
         return result
-
     try:
-        server = Server(server_uri, get_info=ALL)
-        with Connection(server, user=bind_dn, password=bind_pw, auto_bind=True) as conn:
+        with Connection(Server(server, get_info=ALL), user=bind_dn, password=bind_pw, auto_bind=True) as c:
             for login in logins:
-                # Common attributes; adjust filter as per directory schema
-                search_filter = f"(|(sAMAccountName={login})(uid={login})(mailNickname={login}))"
-                conn.search(search_base=base_dn or "", search_filter=search_filter, attributes=["mail"])
-                emails: List[str] = []
-                for entry in conn.entries:
-                    try:
-                        mail_attr = entry["mail"]
-                        if mail_attr and mail_attr.value:
-                            emails.append(str(mail_attr.value))
-                    except Exception:
-                        continue
-                result[login] = emails
-        return result
+                filt = f"(|(sAMAccountName={login})(uid={login})(mailNickname={login}))"
+                c.search(search_base=base_dn or '', search_filter=filt, attributes=["mail"])
+                result[login] = [str(e["mail"].value) for e in c.entries if "mail" in e and e["mail"].value]
     except Exception as e:
         logger.error(f"LDAP lookup failed: {e}")
-        return result
+    return result
 
 
 @app.post("/lookup")
-def lookup(payload: Dict = Body(...)) -> JSONResponse:
-    """Request body: { "logins": ["user1", "user2"], "ldap": {optional overrides} }
-
-    Response: { "users": { "user1": ["a@b"], ... } }
-    """
-    logins: List[str] = list({str(u).strip() for u in payload.get("logins", []) if str(u).strip()})
+def lookup(payload=Body(...)):
+    logins = [str(u).strip() for u in payload.get("logins", []) if str(u).strip()]
     ldap_cfg = payload.get("ldap", {}) or {}
     users = ldap_lookup(
         logins,
@@ -74,7 +39,7 @@ def lookup(payload: Dict = Body(...)) -> JSONResponse:
         ldap_cfg.get("bind_pw"),
         ldap_cfg.get("base_dn"),
     )
-    return JSONResponse({"users": users})
+    return {"users": users}
 
 
 @app.get("/health")
@@ -84,7 +49,4 @@ def health():
 
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8086, log_config=None)
-
-
+    uvicorn.run(app, host="0.0.0.0", port=8086)
