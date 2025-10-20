@@ -18,7 +18,13 @@ from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 
 from config.env import st
-from core.mhe_log import EXTENDED_COLUMNS
+# Local fixed column schema (decoupled from other modules)
+EXTENDED_COLUMNS = [
+    "action", "date", "dstcountry", "dstip", "dstport",
+    "eventtype", "ipaddr", "msg", "srccountry", "srcip",
+    "utmtype", "time", "user", "category", "hostname",
+    "service", "url", "httpagent", "level", "threat"
+]
 
 
 def setup_logging() -> None:
@@ -135,66 +141,102 @@ def gen_csv(rows: List[Tuple]) -> str:
     return output.getvalue()
 
 
+def gen_excel(rows: List[Tuple]) -> bytes:
+    # HTML-based .xls that Excel/LibreOffice open without python deps
+    thead = "".join(f"<th>{h}</th>" for h in EXTENDED_COLUMNS)
+    tbody = "".join(
+        "<tr>" + "".join(f"<td>{(c if c is not None else '')}</td>" for c in row) + "</tr>"
+        for row in rows
+    )
+    html = f"""<html><head><meta charset='UTF-8'></head>
+<body><table border='1'><thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table></body></html>"""
+    return html.encode("utf-8")
+
+
+def render_html_page(login: str, date_str: str, rows: List[Tuple], token: str) -> str:
+    download_csv_url = f"/download/csv?token={token}"
+    download_xlsx_url = f"/download/excel?token={token}"
+    controls = (
+        f"<div class=\"controls\">"
+        f"<a class=\"btn\" href=\"{download_csv_url}\">Скачать CSV</a>"
+        f"<a class=\"btn btn-primary\" href=\"{download_xlsx_url}\">Скачать Excel</a>"
+        f"</div>"
+    )
+    table_html = render_html_table(rows)
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset=\"UTF-8\" />
+  <title>Отчёт для {login}</title>
+  <link rel=\"stylesheet\" href=\"/static/report.css\" />
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+  <style>/* fallback minimal styles if CSS missing */ body{{font-family:Arial,Helvetica,sans-serif;margin:20px}}</style>
+  </head>
+<body>
+  <h2>Отчёт о событиях безопасности для {login} ({date_str})</h2>
+  {controls}
+  {table_html}
+</body>
+</html>"""
+
+
 def calculate_next_run_time() -> datetime:
-    """Calculate next scheduled run time based on REPORT_SEND_TIME"""
-    try:
-        hour, minute = map(int, st.REPORT_SEND_TIME.split(":"))
-        target_time = dt_time(hour, minute)
-    except Exception:
-        logger.error(f"Invalid REPORT_SEND_TIME format: {st.REPORT_SEND_TIME}, using 09:00")
-        target_time = dt_time(9, 0)
-    
+    """Calculate next scheduled run time at 08:00 system local time."""
+    target_time = dt_time(8, 0)
     now = datetime.now()
     next_run = datetime.combine(now.date(), target_time)
-    
-    # If target time already passed today, schedule for tomorrow
     if next_run <= now:
         next_run += timedelta(days=1)
-    
     return next_run
 
 
 def send_daily_reports() -> Dict:
-    """Execute daily report sending (internal function)"""
-    yesterday = datetime.utcnow().date() - timedelta(days=1)
-    yesterday_str = yesterday.strftime("%Y-%m-%d")
-    
-    # Placeholder: fetch user list; replace with a real source
-    users: List[str] = []
-    
-    # LDAP lookup
+    """Для каждого пользователя проверяем логи за вчера 08:00 + 24 часа.
+    Если логов нет — письмо о том, что событий нет. Если логи есть — письмо с шифр. ссылкой.
+    """
+    today_local = datetime.now().date()
+    window_start = datetime.combine(today_local - timedelta(days=1), dt_time(8, 0))
+    window_end = window_start + timedelta(days=1)
+    yesterday_str = (today_local - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # Fetch logins+emails from LDAP service
     try:
-        ldap_url = f"http://{st.MHE_LDAP_HOST}:{st.MHE_LDAP_PORT}/lookup"
-        resp = requests.post(ldap_url, json={"logins": users}, timeout=5)
-        mapping = resp.json().get("users", {}) if resp.ok else {}
+        ldap_url = f"http://{st.MHE_LDAP_HOST}:{st.MHE_LDAP_PORT}/list"
+        resp = requests.get(ldap_url, timeout=10)
+        payload = resp.json() if resp.ok else {"users": []}
+        user_items = payload.get("users", [])
     except Exception as e:
-        logger.error(f"LDAP lookup failed: {e}")
-        mapping = {u: [] for u in users}
-    
+        logger.error(f"LDAP list request failed: {e}")
+        user_items = []
+
     sent: Dict[str, str] = {}
-    for login in users:
-        emails = mapping.get(login, [])
-        rows = query_utmlogs_by_user_and_day(login, datetime.strptime(yesterday_str, "%Y-%m-%d"), datetime.strptime(yesterday_str, "%Y-%m-%d") + timedelta(days=1))
-        if not emails:
-            logger.info(f"No emails for {login}; skipping")
+    for item in user_items:
+        login = str(item.get("login", "")).strip()
+        emails = [str(x).strip() for x in item.get("emails", []) if str(x).strip()]
+        if not login or not emails:
             continue
-        
+
+        rows = query_utmlogs_by_user_and_day(login, window_start, window_end)
         if not rows:
-            subject = f"[UTM] Нет логов за {yesterday_str}"
-            body = f"Для пользователя {login} логи за {yesterday_str} отсутствуют."
-        else:
-            token = _sign({"login": login, "date": yesterday_str}, st.API_TOKEN)
-            report_url = f"http://{st.MHE_EMAIL_HOST}:{st.MHE_EMAIL_PORT}/report?token={token}"
-            subject = f"[UTM] Отчет за {yesterday_str}"
-            body = f"Отчет доступен по ссылке: {report_url}\nCSV: {report_url.replace('/report', '/report.csv')}"
-        
-        # Send email via SMTP
+            subject = f"[UTM] Нет событий безопасности за {yesterday_str}"
+            body = f"События безопасности для абонента {login} за {yesterday_str} отсутствуют."
+            if send_email_smtp(emails, subject, body):
+                sent[login] = subject
+            else:
+                logger.error(f"Failed to send 'no events' email to {login}")
+            continue
+
+        token = _sign({"login": login, "date": yesterday_str}, st.EMAIL_TOKEN)
+        report_url = f"http://{st.MHE_EMAIL_HOST}:{st.MHE_EMAIL_PORT}/report?token={token}"
+        subject = f"[UTM] Отчёт о событиях безопасности за {yesterday_str}"
+        body = f"Отчёт о событиях безопасности для абонента {login} за {yesterday_str}: {report_url}"
+
         if send_email_smtp(emails, subject, body):
             sent[login] = subject
         else:
-            logger.error(f"Failed to send email to {login}")
-    
-    return {"date": yesterday_str, "processed": len(users), "sent": sent}
+            logger.error(f"Failed to send report link to {login}")
+
+    return {"date": yesterday_str, "processed": len(user_items), "sent": sent}
 
 
 async def daily_report_scheduler():
@@ -223,18 +265,17 @@ async def daily_report_scheduler():
             logger.info(f"Daily reports sent: {result}")
         except Exception as e:
             logger.error(f"Error in daily scheduler: {e}")
-            await asyncio.sleep(3600)  # Retry in 1 hour on error
+            await asyncio.sleep(60)  # Retry in 1 minute on error
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Start background scheduler on app startup"""
-    asyncio.create_task(daily_report_scheduler())
+# Note: When running via uvicorn CLI (e.g., `uvicorn core.mhe_email:app`),
+# you may want to enable the scheduler via a startup hook. In this module,
+# we explicitly run server and scheduler in parallel under __main__.
 
 
 @app.get("/report", response_class=HTMLResponse)
 def report(token: str = Query(...)):
-    payload = _unsign(token, st.API_TOKEN)
+    payload = _unsign(token, st.EMAIL_TOKEN)
     if not payload:
         return HTMLResponse("<h3>Invalid token</h3>", status_code=400)
     login = payload.get("login")
@@ -249,9 +290,9 @@ def report(token: str = Query(...)):
     return HTMLResponse(f"<h2>Report for {login} ({date_str})</h2>" + html_table)
 
 
-@app.get("/report.csv")
-def report_csv(token: str = Query(...)):
-    payload = _unsign(token, st.API_TOKEN)
+@app.get("/download/csv")
+def download_csv(token: str = Query(...)):
+    payload = _unsign(token, st.EMAIL_TOKEN)
     if not payload:
         return JSONResponse({"error": "invalid token"}, status_code=400)
     login = payload.get("login")
@@ -261,27 +302,44 @@ def report_csv(token: str = Query(...)):
     csv_text = gen_csv(rows)
     return StreamingResponse(iter([csv_text.encode("utf-8")]), media_type="text/csv")
 
-
-# Manual trigger endpoint (can be triggered externally via cron/k8s)
-@app.get("/run_daily")
-def run_daily():
-    """Manual trigger for daily report sending.
-    
-    Note: Reports are now sent automatically at scheduled time (REPORT_SEND_TIME).
-    This endpoint allows manual triggering if needed.
-    """
-    logger.info("Manual trigger: running daily reports")
-    return send_daily_reports()
-
+@app.get("/download/excel")
+def download_excel(token: str = Query(...)):
+    payload = _unsign(token, st.EMAIL_TOKEN)
+    if not payload:
+        return JSONResponse({"error": "invalid token"}, status_code=400)
+    login = payload.get("login")
+    date_str = payload.get("date")
+    day = datetime.strptime(date_str, "%Y-%m-%d")
+    rows = query_utmlogs_by_user_and_day(login, day, day + timedelta(days=1))
+    data = gen_excel(rows)
+    return StreamingResponse(iter([data]), media_type="application/vnd.ms-excel", headers={
+        "Content-Disposition": f"attachment; filename=utm_report_{login}_{date_str}.xls"
+    })
 
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "mhe_email"}
 
-
 if __name__ == "__main__":
     import uvicorn
+    import asyncio
 
-    uvicorn.run(app, host="0.0.0.0", port=80, log_config=None)
+    async def _run():
+        # Run uvicorn server and daily scheduler in parallel
+        config = uvicorn.Config(app, host="0.0.0.0", port=80, log_config=None, loop="asyncio")
+        server = uvicorn.Server(config)
+
+        server_task = asyncio.create_task(server.serve())
+        scheduler_task = asyncio.create_task(daily_report_scheduler())
+
+        done, pending = await asyncio.wait(
+            {server_task, scheduler_task},
+            return_when=asyncio.FIRST_EXCEPTION,
+        )
+        # Cancel the other task if one finishes/errors
+        for t in pending:
+            t.cancel()
+
+    asyncio.run(_run())
 
 

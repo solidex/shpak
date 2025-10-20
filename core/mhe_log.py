@@ -18,12 +18,16 @@ def parse_syslog_payload(raw_text: str) -> dict | None:
     except Exception:
         return None
 
+    #"action", "date", "dstcountry", "dstip", "dstport", "eventtype", 
+    #"group", "ipaddr", "level", "msg", "srccountry", "srcip", 
+    #"subtype", "time", "type", "user", "catdesc", "hostname", "service", 
+    #"url", "agent", "crlevel", "threat"
 
 EXTENDED_COLUMNS = [
-    "action", "date", "dstcountry", "dstip", "dstport", "eventtype", 
-    "group", "ipaddr", "level", "msg", "srccountry", "srcip", 
-    "subtype", "time", "type", "user", "catdesc", "hostname", "service", 
-    "url", "agent", "crlevel", "threat"
+    "action", "date", "dstcountry", "dstip", "dstport",
+    "eventtype", "ipaddr", "msg", "srccountry", "srcip",
+    "utmtype", "time", "user", "category", "hostname",
+    "service", "url", "httpagent", "level", "threat"
 ]
 
 
@@ -37,6 +41,20 @@ def save_utm_log_full(record: dict) -> None:
     attack = record.get("attack", "")
     if virus or attack:
         record["threat"] = virus or attack
+    
+    # Backward-compatible field renames to match EXTENDED_COLUMNS
+    # subtype -> utmtype
+    if "subtype" in record:
+        record["utmtype"] = record.get("subtype")
+    # catdesc -> category
+    if "catdesc" in record:
+        record["category"] = record.get("catdesc")
+    # agent -> httpagent
+    if "agent" in record:
+        record["httpagent"] = record.get("agent")
+    # crlevel -> level
+    if "crlevel" in record:
+        record["level"] = record.get("crlevel")
     
     # Build values list in the order of EXTENDED_COLUMNS
     values = [str(record.get(col, "")) if record.get(col) is not None else None for col in EXTENDED_COLUMNS]
