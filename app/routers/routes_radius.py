@@ -1,7 +1,7 @@
 from fastapi import APIRouter
-from models.models import RadiusEvent, SimpleResponse
+from app.models.models import RadiusEvent, SimpleResponse
 import mysql.connector
-from config.env import st
+from app.config.env import st
 from datetime import datetime
 import requests
 import logging

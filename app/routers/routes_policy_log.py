@@ -1,6 +1,6 @@
 import logging
 import mysql.connector
-from config.env import st
+from app.config.env import st
 from fastapi import APIRouter, Body, Query
 from datetime import datetime
 

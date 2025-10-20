@@ -14,7 +14,7 @@ import requests
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 
-from config.env import st
+from app.config.env import st
 
 EXTENDED_COLUMNS = [
     "action", "date", "dstcountry", "dstip", "dstport",

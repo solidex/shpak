@@ -1,0 +1,224 @@
+# Egress per service using single BGP LB IP pool 10.3.11.0/24
+# - One pool: 10.3.11.0/24 (already defined in cilium-ippool.yaml)
+# - One egress IP per app, all announced via BGP
+
+---
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumBGPPolicy
+metadata:
+  name: egress-address-advertisements
+  namespace: kube-system
+spec:
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/egress: ""
+  virtualRouters:
+  - localASN: 65017
+    neighbors:
+    - peerAddress: '93.85.81.201/29'
+      peerASN: 6697
+    - peerAddress: '93.85.81.202/29'
+      peerASN: 6697
+    serviceAdvertisements:
+    - addresses:
+      - "10.3.11.201"   # FortiAPI (egress gateway)
+      - "10.3.11.202"   # LDAP (egress gateway)
+      - "10.3.11.203"   # E-Mail (egress gateway)
+
+# Egress Gateway Policies - Only for FortiAPI, LDAP, E-Mail
+# Other services (RADIUS, Log, App, Restore, Superset) use BGP LoadBalancer IPs
+
+---
+apiVersion: cilium.io/v2
+kind: CiliumEgressGatewayPolicy
+metadata:
+  name: egress-fortiapi
+  namespace: kube-system
+spec:
+  selectors:
+  - namespaceSelector:
+      matchLabels:
+        name: apk-system
+    podSelector:
+      matchLabels:
+        app: fortigate-service
+  destinationCIDRs:
+  - "0.0.0.0/0"
+  egressGateway:
+    nodeSelector:
+      matchLabels:
+        node-role.kubernetes.io/egress: ""
+    interface: "eth0"
+    egressIP: "10.3.11.201"
+
+---
+apiVersion: cilium.io/v2
+kind: CiliumEgressGatewayPolicy
+metadata:
+  name: egress-ldap
+  namespace: kube-system
+spec:
+  selectors:
+  - namespaceSelector:
+      matchLabels:
+        name: apk-system
+    podSelector:
+      matchLabels:
+        app: fastapi-sql
+  destinationCIDRs:
+  - "0.0.0.0/0"
+  egressGateway:
+    nodeSelector:
+      matchLabels:
+        node-role.kubernetes.io/egress: ""
+    interface: "eth0"
+    egressIP: "10.3.11.202"
+
+---
+apiVersion: cilium.io/v2
+kind: CiliumEgressGatewayPolicy
+metadata:
+  name: egress-email
+  namespace: kube-system
+spec:
+  selectors:
+  - namespaceSelector:
+      matchLabels:
+        name: apk-system
+    podSelector:
+      matchLabels:
+        app: syslog-email-sender
+  destinationCIDRs:
+  - "0.0.0.0/0"
+  egressGateway:
+    nodeSelector:
+      matchLabels:
+        node-role.kubernetes.io/egress: ""
+    interface: "eth0"
+    egressIP: "10.3.11.203"
+
+---
+# LoadBalancer Services for BGP Load Balancer IPs
+# These services get their IPs from BGP LoadBalancer, not egress gateway
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: radius-service
+  namespace: apk-system
+  annotations:
+    cilium.io/loadbalancer-ip-pool: "lb-pool"
+spec:
+  type: LoadBalancer
+  loadBalancerClass: "cilium"
+  loadBalancerIP: "10.3.11.101"
+  ports:
+  - port: 1812
+    targetPort: 1812
+    protocol: UDP
+    name: radius-auth
+  - port: 1813
+    targetPort: 1813
+    protocol: UDP
+    name: radius-acct
+  selector:
+    app: radius-sniffer-service
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logging-service
+  namespace: apk-system
+  annotations:
+    cilium.io/loadbalancer-ip-pool: "lb-pool"
+spec:
+  type: LoadBalancer
+  loadBalancerClass: "cilium"
+  loadBalancerIP: "10.3.11.102"
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  - port: 443
+    targetPort: 443
+    protocol: TCP
+    name: https
+  selector:
+    app: logging-service
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-service
+  namespace: apk-system
+  annotations:
+    cilium.io/loadbalancer-ip-pool: "lb-pool"
+spec:
+  type: LoadBalancer
+  loadBalancerClass: "cilium"
+  loadBalancerIP: "10.3.11.103"
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  - port: 443
+    targetPort: 443
+    protocol: TCP
+    name: https
+  selector:
+    app: operation-logic
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: restore-service
+  namespace: apk-system
+  annotations:
+    cilium.io/loadbalancer-ip-pool: "lb-pool"
+spec:
+  type: LoadBalancer
+  loadBalancerClass: "cilium"
+  loadBalancerIP: "10.3.11.108"
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  - port: 443
+    targetPort: 443
+    protocol: TCP
+    name: https
+  selector:
+    app: msg-restore
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: superset-service
+  namespace: apk-system
+  annotations:
+    cilium.io/loadbalancer-ip-pool: "lb-pool"
+spec:
+  type: LoadBalancer
+  loadBalancerClass: "cilium"
+  loadBalancerIP: "10.3.11.105"
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  - port: 443
+    targetPort: 443
+    protocol: TCP
+    name: https
+  selector:
+    app: superset
+
+

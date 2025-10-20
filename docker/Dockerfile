@@ -3,27 +3,36 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PATH="/opt/app/.local/bin:$PATH"
 
 WORKDIR /opt/app
 
-# System deps if needed
+# System dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+    build-essential \
+    ca-certificates \
+    libssl-dev \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy project
-COPY . /opt/app/shpak-k8s/
+# Copy requirements first for better layer caching
+COPY docker/requirements.txt /opt/app/requirements.txt
+RUN pip install --upgrade pip && \
+    pip install -r /opt/app/requirements.txt
 
-# Install Python deps (fallback to minimal if file missing)
-COPY ./tests/requirements.txt /opt/app/requirements.txt
-RUN if [ -f /opt/app/requirements.txt ]; then \
-      pip install -r /opt/app/requirements.txt; \
-    else \
-      pip install fastapi uvicorn pydantic[dotenv] orjson httpx PyYAML; \
-    fi
+# Copy application code
+COPY app/ /opt/app/app/
 
-# Default command; override per service
-CMD ["python", "-c", "import os; print('shpak-k8s image ready; mount service code or set CMD')"]
+# Create non-root user for security
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /opt/app
+USER appuser
 
+# Health check (override per service)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import sys; sys.exit(0)"
+
+# Default command
+CMD ["python", "-c", "print('shpak-k8s ready. Override CMD per service.')"]
 

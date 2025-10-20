@@ -8,7 +8,7 @@ except ImportError:
     Server = Connection = Tls = None
 
 try:
-    from config.env import st
+    from app.config.env import st
 except ImportError:
     st = None
 

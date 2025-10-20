@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Query, Body
 from typing import Optional
-from models.models import FirewallProfileIn, ListResponse, ItemResponse, SimpleResponse
+from app.models.models import FirewallProfileIn, ListResponse, ItemResponse, SimpleResponse
 import mysql.connector, requests, hashlib, time, logging
-from config.env import st
+from app.config.env import st
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)

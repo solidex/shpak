@@ -2,8 +2,8 @@ import logging
 import json
 import requests
 from fastapi import FastAPI
-from config.env import st
-from models.fortigate_models import (
+from app.config.env import st
+from app.models.fortigate_models import (
     CreateIPRequest, CreateIPv6Request, CreateServiceRequest, CreatePolicyRequest,
     DeleteObjectRequest, DeletePolicyRequest, MovePolicyRequest, GetPolicyRequest, EditPolicyRequest
 )

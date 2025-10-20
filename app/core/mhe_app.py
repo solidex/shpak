@@ -3,14 +3,14 @@ import logging
 from fastapi import FastAPI, HTTPException, Response, status, Query, Body
 from fastapi.responses import ORJSONResponse
 from datetime import datetime
-from models.fastclass import (
+from app.models.fastclass import (
     FirewallProfilePagination,
     CreateProfileRequest,
     UpdateProfileRequest,
     PrettyJSONResponse,
 )
 from pydantic import BaseModel
-from config.env import st
+from app.config.env import st
 import requests
 
 logger = logging.getLogger("mhe_app")
@@ -41,7 +41,7 @@ def db_request(method: str, path: str, **kwargs):
 
 @app.get("/api/firewall_profile_rules", response_class=ORJSONResponse)
 async def get_firewall_profiles(page: int = 1, page_size: int = 25):
-    with open('config/ports.json') as f:
+    with open('app/config/ports.json') as f:
         raw_data = json.load(f)
     return FirewallProfilePagination(raw_data, page_size).paginate(page)
 

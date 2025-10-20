@@ -5,7 +5,7 @@ from scapy.all import sniff
 from scapy.layers.radius import Radius
 from scapy.layers.inet import IP
 from pyrad.packet import Packet
-from config.env import st
+from app.config.env import st
 import requests
 
 logger = logging.getLogger("mhe_radius")

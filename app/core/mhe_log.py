@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 
 import mysql.connector
-from config.env import st
+from app.config.env import st
 
 logger = logging.getLogger("mhe_log")
 

@@ -1,7 +1,7 @@
 import json
 import logging
 from fastapi import FastAPI, Request
-from config.env import st
+from app.config.env import st
 import requests
 
 logger = logging.getLogger("mhe_ae")
@@ -12,7 +12,7 @@ FG_URL = f"http://{st.MHE_FORTIAPI_HOST}:{st.MHE_FORTIAPI_PORT}"
 
 # Загружаем и кэшируем порты один раз
 def _load_ports_matrix():
-    with open('config/ports.json') as f:
+    with open('app/config/ports.json') as f:
         data = json.load(f)
     tcp = {tok.strip() for item in data for tok in str(item.get('tcp_rules', '')).split(',') if tok.strip()}
     udp = {tok.strip() for item in data for tok in str(item.get('udp_rules', '')).split(',') if tok.strip()}

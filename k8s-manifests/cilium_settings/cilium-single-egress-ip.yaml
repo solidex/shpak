@@ -1,0 +1,310 @@
+# Single Egress IP shared across all nodes
+# This configuration uses one egress IP (93.85.81.204) for all three nodes
+
+---
+# BGP Peering Policy for all egress nodes
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumBGPPeeringPolicy
+metadata:
+  name: single-egress-bgp-peering
+  namespace: kube-system
+spec:
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/egress: ""
+  virtualRouters:
+  - localASN: 65017
+    exportPodCIDR: true
+    exportServices: true
+    neighbors:
+    - peerAddress: '93.85.81.201/29'
+      peerASN: 6697
+      connectRetryTimeSeconds: 120
+      holdTimeSeconds: 90
+      keepAliveTimeSeconds: 30
+    - peerAddress: '93.85.81.202/29'
+      peerASN: 6697
+      connectRetryTimeSeconds: 120
+      holdTimeSeconds: 90
+      keepAliveTimeSeconds: 30
+
+---
+# Single IP Pool for shared egress IP
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: single-egress-pool
+  namespace: kube-system
+spec:
+  cidrs:
+  - cidr: "93.85.81.204/32"  # Single egress IP for all nodes
+
+---
+# BGP Advertisement for single egress IP
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumBGPPolicy
+metadata:
+  name: single-egress-advertisement
+  namespace: kube-system
+spec:
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/egress: ""
+  virtualRouters:
+  - localASN: 65017
+    neighbors:
+    - peerAddress: '93.85.81.201/29'
+      peerASN: 6697
+    - peerAddress: '93.85.81.202/29'
+      peerASN: 6697
+    serviceAdvertisements:
+    - addresses:
+      - "93.85.81.204"  # Single egress IP advertised by all nodes
+      communities:
+      - "65017:100"  # Community for egress gateway
+
+---
+# Egress Gateway Policy using single IP
+apiVersion: cilium.io/v2
+kind: CiliumEgressGatewayPolicy
+metadata:
+  name: single-egress-policy
+  namespace: kube-system
+spec:
+  selectors:
+  - namespaceSelector:
+      matchLabels:
+        name: apk-system
+  destinationCIDRs:
+  - "0.0.0.0/0"
+  egressGateway:
+    nodeSelector:
+      matchLabels:
+        node-role.kubernetes.io/egress: ""
+    interface: "eth0"
+    egressIP: "93.85.81.204"  # Same IP for all nodes
+
+---
+# LoadBalancer Service with single egress IP
+apiVersion: v1
+kind: Service
+metadata:
+  name: single-egress-service
+  namespace: kube-system
+  annotations:
+    service.beta.kubernetes.io/load-balancer-source-ranges: "0.0.0.0/0"
+    cilium.io/loadbalancer-ip-pool: "single-egress-pool"
+    cilium.io/egress-gateway: "true"
+spec:
+  type: LoadBalancer
+  loadBalancerClass: "cilium"
+  loadBalancerIP: "93.85.81.204"  # Fixed egress IP
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  - port: 443
+    targetPort: 443
+    protocol: TCP
+    name: https
+  selector:
+    app: egress-gateway
+
+---
+# Alternative: Multiple Egress Policies with same IP (for different traffic types)
+apiVersion: cilium.io/v2
+kind: CiliumEgressGatewayPolicy
+metadata:
+  name: single-egress-api-traffic
+  namespace: kube-system
+spec:
+  selectors:
+  - podSelector:
+      matchLabels:
+        app: fortigate-service
+  destinationCIDRs:
+  - "8.8.8.8/32"
+  - "1.1.1.1/32"
+  - "api.fortinet.com/32"
+  egressGateway:
+    nodeSelector:
+      matchLabels:
+        egress-gateway: "primary"
+    interface: "eth0"
+    egressIP: "93.85.81.204"  # Same IP, different node selection
+
+---
+apiVersion: cilium.io/v2
+kind: CiliumEgressGatewayPolicy
+metadata:
+  name: single-egress-database-traffic
+  namespace: kube-system
+spec:
+  selectors:
+  - podSelector:
+      matchLabels:
+        app: mysql-handler
+  destinationCIDRs:
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+  egressGateway:
+    nodeSelector:
+      matchLabels:
+        egress-gateway: "secondary"
+    interface: "eth0"
+    egressIP: "93.85.81.204"  # Same IP, different node selection
+
+---
+# Network Policy for single egress IP
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: single-egress-traffic-policy
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: apk-system
+  egress:
+  - toEntities:
+    - world
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+      - port: "443"
+        protocol: TCP
+      - port: "53"
+        protocol: TCP
+      - port: "53"
+        protocol: UDP
+    - ports:
+      - port: "22"
+        protocol: TCP
+      - port: "179"
+        protocol: TCP  # BGP
+    toCIDR:
+    - "93.85.81.201/29"  # BGP peer 1
+    - "93.85.81.202/29"  # BGP peer 2
+    - "93.85.81.204/32"  # Single egress IP
+
+---
+# ConfigMap for single egress IP configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: single-egress-config
+  namespace: kube-system
+data:
+  config.yaml: |
+    egress_gateway:
+      enabled: true
+      shared_ip: "93.85.81.204"
+      nodes:
+        - name: "lenovo-204"
+          interface: "eth0"
+          priority: 1
+        - name: "lenovo-205"
+          interface: "eth0"
+          priority: 2
+        - name: "lenovo-206"
+          interface: "eth0"
+          priority: 3
+      
+    bgp:
+      enabled: true
+      localASN: 65017
+      shared_egress_ip: "93.85.81.204"
+      community: "65017:100"
+      neighbors:
+        - peerAddress: "93.85.81.201/29"
+          peerASN: 6697
+        - peerAddress: "93.85.81.202/29"
+          peerASN: 6697
+      
+    load_balancing:
+      method: "round_robin"  # or "least_conn", "ip_hash"
+      health_check: true
+      failover: true
+
+---
+# DaemonSet for single egress IP across all nodes
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: single-egress-gateway
+  namespace: kube-system
+  labels:
+    app: single-egress-gateway
+spec:
+  selector:
+    matchLabels:
+      app: single-egress-gateway
+  template:
+    metadata:
+      labels:
+        app: single-egress-gateway
+      annotations:
+        cilium.io/egress-gateway: "true"
+        cilium.io/shared-egress-ip: "93.85.81.204"
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/egress: ""
+      containers:
+      - name: cilium-egress-gateway
+        image: cilium/cilium:latest
+        command:
+        - cilium
+        - egress-gateway
+        - --config-dir=/etc/cilium
+        - --bgp-enabled=true
+        - --egress-gateway-enabled=true
+        - --shared-egress-ip=93.85.81.204
+        - --load-balancing=round_robin
+        env:
+        - name: CILIUM_K8S_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: SHARED_EGRESS_IP
+          value: "93.85.81.204"
+        volumeMounts:
+        - name: cilium-config
+          mountPath: /etc/cilium
+        - name: cilium-run
+          mountPath: /var/run/cilium
+        - name: lib-modules
+          mountPath: /lib/modules
+          readOnly: true
+        - name: bpf-maps
+          mountPath: /sys/fs/bpf
+        securityContext:
+          privileged: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+      volumes:
+      - name: cilium-config
+        configMap:
+          name: single-egress-config
+      - name: cilium-run
+        hostPath:
+          path: /var/run/cilium
+      - name: lib-modules
+        hostPath:
+          path: /lib/modules
+      - name: bpf-maps
+        hostPath:
+          path: /sys/fs/bpf
+      hostNetwork: true
+      tolerations:
+      - operator: Exists

@@ -2,10 +2,10 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from fastapi import FastAPI
-from routers.routes_firewall import router as firewall_router
-from routers.routes_radius import router as radius_router
-from routers.routes_query import router as query_router
-from routers.routes_policy_log import router as policy_log_router
+from app.routers.routes_firewall import router as firewall_router
+from app.routers.routes_radius import router as radius_router
+from app.routers.routes_query import router as query_router
+from app.routers.routes_policy_log import router as policy_log_router
 
 log_dir = Path("logs")
 log_dir.mkdir(exist_ok=True)
