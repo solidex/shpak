@@ -1,5 +1,4 @@
 import os
-import ssl
 import logging
 from fastapi import FastAPI
 
@@ -13,7 +12,6 @@ try:
 except ImportError:
     st = None
 
-# Простой логгер
 logger = logging.getLogger("mhe_ldap")
 if not logger.hasHandlers():
     log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
@@ -23,56 +21,42 @@ if not logger.hasHandlers():
     logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 
-app = FastAPI(title="MHE LDAP Service")
+app = FastAPI()
 
-def _connect(uri, dn, pw, start_tls):
+def ldap_list_with_emails(uri, dn, pw, base_dn, start_tls=False):
     if not (Server and uri and dn and pw):
         logger.error("LDAP config missing or ldap3 not installed")
-        return None
+        return []
     try:
-        tls_ctx = Tls(validate=ssl.CERT_NONE) if (uri.startswith("ldaps://") or start_tls) else None
-        server = Server(uri, get_info=ALL, tls=tls_ctx)
+        tls = Tls(validate=None) if (uri.startswith("ldaps://") or start_tls) else None
+        server = Server(uri, get_info=ALL, tls=tls)
         conn = Connection(server, user=dn, password=pw, auto_bind=True)
         if start_tls and not uri.startswith("ldaps://"):
             conn.start_tls()
-        return conn
-    except Exception as e:
-        logger.error(f"LDAP connect failed: {e}")
-        return None
-
-def ldap_list_with_emails(server_uri, bind_dn, bind_pw, base_dn, start_tls=False):
-    conn = _connect(server_uri, bind_dn, bind_pw, start_tls)
-    if not conn:
-        return []
-    try:
         conn.search(base_dn or '', '(mail=*)', attributes=["mail", "sAMAccountName", "uid", "mailNickname"])
-        result = []
+        res = []
         for e in conn.entries:
-            login = next(
-                (str(getattr(e, attr).value)
-                 for attr in ("sAMAccountName", "uid", "mailNickname")
-                 if hasattr(e, attr) and getattr(e, attr).value),
-                None
-            )
-            if login and hasattr(e, "mail") and getattr(e, "mail").value:
-                mail_attr = getattr(e, "mail")
-                if hasattr(mail_attr, "values"):
-                    emails = [str(v) for v in mail_attr.values if v]
-                else:
-                    emails = [str(mail_attr.value)] if mail_attr.value else []
-                if emails:
-                    result.append({"login": login, "emails": emails})
-        logger.info(f"List users with emails: {len(result)} entries")
-        return result
+            login = next((str(getattr(e, attr).value)
+                         for attr in ("sAMAccountName", "uid", "mailNickname")
+                         if hasattr(e, attr) and getattr(e, attr).value), None)
+            mails = getattr(e, "mail", None)
+            emails = []
+            if mails:
+                val = mails.value
+                vals = mails.values if hasattr(mails, "values") else None
+                emails = [str(v) for v in (vals or [val]) if v]
+            if login and emails:
+                res.append({"login": login, "emails": emails})
+        logger.info(f"Listed {len(res)} users with emails")
+        return res
     except Exception as e:
-        logger.error(f"LDAP list query failed: {e}")
+        logger.error(f"LDAP error: {e}")
         return []
 
 @app.get("/list")
 def list_users():
-    """Return list of users with emails: [{login, emails: [..]}]."""
-    if st is None:
-        logger.error("Settings 'st' not available; cannot perform LDAP list")
+    if not st:
+        logger.error("'st' not available")
         return {"users": []}
     users = ldap_list_with_emails(
         getattr(st, "LDAP_URI", None),
@@ -90,5 +74,5 @@ def health():
 if __name__ == "__main__":
     import uvicorn
     port = getattr(st, "MHE_LDAP_PORT", 80) if st else 80
-    logger.info(f"Starting MHE LDAP service on port {port}")
+    logger.info(f"Starting MHE LDAP on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)

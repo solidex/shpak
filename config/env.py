@@ -20,6 +20,8 @@ def _get(name: str, default: Any = None, cast=None):
 class _Settings:
     # API token
     API_TOKEN: str = _get("API_TOKEN", "1234567890")
+    # Email token (separate secret used to sign report links)
+    EMAIL_TOKEN: str = _get("EMAIL_TOKEN", "email-secret")
 
     # MySQL settings (legacy block left for compatibility)
     mysql_config: Dict[str, Any] = {
@@ -31,19 +33,25 @@ class _Settings:
         'use_pure': _get('MYSQL_USE_PURE', 'True'),
     }
 
-    # Default policy JSON fields (string values expected by FortiGate)
+    # Default FortiGate policy payload (data section) aligned with current API usage
     default_policy: Dict[str, Any] = {
-        "srcintf": _get("DEFAULT_POLICY_SRCINTF", "PPoE"),
-        "dstintf": _get("DEFAULT_POLICY_DSTINTF", "Ethernet"),
-        "dstaddr": _get("DEFAULT_POLICY_DSTADDR", "all"),
-        "dstaddr6": _get("DEFAULT_POLICY_DSTADDR6", "all"),
+        "action": _get("DEFAULT_POLICY_ACTION", "deny"),
+        "srcintf": [{"name": _get("DEFAULT_POLICY_SRCINTF", "PPPoE_vlan")}],
+        "dstintf": [{"name": _get("DEFAULT_POLICY_DSTINTF", "Core_vlan")}],
+        "dstaddr": [
+            {"name": _get("DEFAULT_POLICY_DSTADDR1", "ns3.belpak.by_ipv4")},
+            {"name": _get("DEFAULT_POLICY_DSTADDR2", "ns4.belpak.by_ipv4")},
+        ],
+        "dstaddr6": [
+            {"name": _get("DEFAULT_POLICY_DSTADDR6_1", "ns3.belpak.by_ipv6")},
+            {"name": _get("DEFAULT_POLICY_DSTADDR6_2", "ns4.belpak.by_ipv6")},
+        ],
         "schedule": _get("DEFAULT_POLICY_SCHEDULE", "always"),
-        "utm-status": _get("DEFAULT_POLICY_UTM_STATUS", "enable"),
-        "av-profile": _get("DEFAULT_POLICY_AV_PROFILE", "g-default"),
-        "ips-sensor": _get("DEFAULT_POLICY_IPS_SENSOR", "g-default"),
-        "dns-filter-profile": _get("DEFAULT_POLICY_DNS_FILTER_PROFILE", "dns_custom"),
-        "ssl-ssh-profile": _get("DEFAULT_POLICY_SSL_SSH_PROFILE", "no-inspection"),
-        "nat": _get("DEFAULT_POLICY_NAT", "disable"),
+        "ssl-ssh-profile": _get("DEFAULT_POLICY_SSL_SSH_PROFILE", ""),
+        "logtraffic": _get("DEFAULT_POLICY_LOGTRAFFIC", "disable"),
+        "groups": [{"name": _get("DEFAULT_POLICY_GROUP", "class2")}],
+        "dstaddr-negate": _get("DEFAULT_POLICY_DSTADDR_NEGATE", "enable"),
+        "dstaddr6-negate": _get("DEFAULT_POLICY_DSTADDR6_NEGATE", "enable"),
     }
 
     # RADIUS
@@ -120,16 +128,13 @@ class _Settings:
     MHE_FORTIAPI_PORT = _get("MHE_FORTIAPI_PORT", 80, int)
 
     MHE_LDAP_HOST = _get("MHE_LDAP_HOST", "127.0.0.1")
-    MHE_LDAP_PORT = _get("MHE_LDAP_PORT", 8086, int)
+    MHE_LDAP_PORT = _get("MHE_LDAP_PORT", 80, int)
 
     MHE_EMAIL_HOST = _get("MHE_EMAIL_HOST", "127.0.0.1")
-    MHE_EMAIL_PORT = _get("MHE_EMAIL_PORT", 8087, int)
+    MHE_EMAIL_PORT = _get("MHE_EMAIL_PORT", 80, int)
 
     GUI_HOST = _get("GUI_HOST", "127.0.0.1")
     GUI_PORT = _get("GUI_PORT", 80, int)
-
-    LOGGING_SERVICE_HOST = _get("LOGGING_SERVICE_HOST", "127.0.0.1")
-    LOGGING_SERVICE_PORT = _get("LOGGING_SERVICE_PORT", 80, int)
 
     # SMTP settings
     SMTP_HOST = _get("SMTP_HOST", "localhost")
@@ -141,10 +146,15 @@ class _Settings:
     SMTP_USE_SSL = _get("SMTP_USE_SSL", "False").lower() in ("true", "1", "yes")
     SMTP_TIMEOUT = _get("SMTP_TIMEOUT", 10, int)
     
+    # LDAP settings for mhe_ldap/mhe_email integration
+    LDAP_URI = _get("LDAP_URI", "ldap://127.0.0.1:389")
+    LDAP_BIND_DN = _get("LDAP_BIND_DN", "")
+    LDAP_BIND_PASSWORD = _get("LDAP_BIND_PASSWORD", "")
+    LDAP_BASE_DN = _get("LDAP_BASE_DN", "")
+    LDAP_START_TLS = _get("LDAP_START_TLS", "false")
+    
     # Email report schedule (HH:MM format, 24-hour)
     REPORT_SEND_TIME = _get("REPORT_SEND_TIME", "09:00")
 
 # Export a singleton compatible with previous `start_settings as st`
 st = _Settings()
-
-
