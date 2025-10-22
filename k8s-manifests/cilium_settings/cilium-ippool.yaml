@@ -3,7 +3,8 @@ kind: CiliumLoadBalancerIPPool
 metadata:
   name: "lb-pool"
 spec:
-  cidrs:
-  - cidr: "10.3.11.0/24"
+  blocks:
+  - start: "10.3.11.1"
+    stop:  "10.3.11.254"
 
 

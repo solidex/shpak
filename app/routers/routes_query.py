@@ -9,7 +9,7 @@ router = APIRouter()
 
 def query_db(query, params):
     try:
-        with mysql.connector.connect(**st.mysql_config) as cnx:
+        with mysql.connector.connect(**getattr(st, 'starrocks_config', st.mysql_config)) as cnx:
             with cnx.cursor() as cursor:
                 cursor.execute(query, params)
                 return cursor.fetchall()
@@ -26,7 +26,7 @@ def resp(success=True, data=None, error=None):
 def get_policy_id_by_hash(payload: dict = Body(...)):
     hash_val = payload.get("hash")
     try:
-        rows = query_db("SELECT policy_id FROM firewall_profiles WHERE hash = %s LIMIT 1", (hash_val,))
+        rows = query_db("SELECT policy_id FROM FW_Profiles WHERE hash = %s LIMIT 1", (hash_val,))
         return resp(data={"policy_id": rows[0][0]} if rows else None)
     except Exception as e:
         logger.error(f"Failed to get policy_id by hash: {e}")
@@ -37,9 +37,9 @@ def check_policy_id_and_hash(payload: dict = Body(...)):
     policy_id = payload.get("policy_id")
     hash_val = payload.get("hash")
     try:
-        count_rows = query_db("SELECT COUNT(*) FROM firewall_profiles WHERE policy_id = %s", (policy_id,))
+        count_rows = query_db("SELECT COUNT(*) FROM FW_Profiles WHERE policy_id = %s", (policy_id,))
         exists = count_rows[0][0] > 0 if count_rows else False
-        rows = query_db("SELECT policy_id FROM firewall_profiles WHERE hash = %s LIMIT 1", (hash_val,))
+        rows = query_db("SELECT policy_id FROM FW_Profiles WHERE hash = %s LIMIT 1", (hash_val,))
         hash_policy_id = rows[0][0] if rows else None
         return resp(data={"policy_id_exists": exists, "policy_id_by_hash": hash_policy_id})
     except Exception as e:
@@ -50,7 +50,7 @@ def check_policy_id_and_hash(payload: dict = Body(...)):
 def check_policy_id_exists(payload: dict = Body(...)):
     policy_id = payload.get("policy_id")
     try:
-        count_rows = query_db("SELECT COUNT(*) FROM firewall_profiles WHERE policy_id = %s", (policy_id,))
+        count_rows = query_db("SELECT COUNT(*) FROM FW_Profiles WHERE policy_id = %s", (policy_id,))
         exists = count_rows[0][0] > 0 if count_rows else False
         return resp(data={"policy_id_exists": exists})
     except Exception as e:

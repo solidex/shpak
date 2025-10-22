@@ -10,7 +10,7 @@ router = APIRouter()
 
 @contextmanager
 def db():
-    cnx = mysql.connector.connect(**st.mysql_config)
+    cnx = mysql.connector.connect(**getattr(st, 'starrocks_config', st.mysql_config))
     cursor = cnx.cursor()
     try:
         yield cnx, cursor
@@ -45,7 +45,7 @@ def check_radius_with_keepalive(login: str, max_attempts: int = 3, delay: float 
     """
     for attempt in range(max_attempts):
         with db() as (cnx, cursor):
-            cursor.execute("SELECT * FROM A WHERE User_Name = %s", (login,))
+            cursor.execute("SELECT * FROM RADIUS_Sessions WHERE User_Name = %s", (login,))
             row = cursor.fetchone()
             if row:
                 columns = get_columns(cursor)
@@ -66,21 +66,21 @@ def list_firewall_profiles(page: int = 1, page_size: int = 25, login: Optional[s
             args = [login, page_size, offset] if login else [page_size, offset]
             if login:
                 cursor.execute(
-                    "SELECT * FROM firewall_profiles WHERE login = %s LIMIT %s OFFSET %s",
+                    "SELECT * FROM FW_Profiles WHERE login = %s LIMIT %s OFFSET %s",
                     args
                 )
             else:
                 cursor.execute(
-                    "SELECT * FROM firewall_profiles LIMIT %s OFFSET %s",
+                    "SELECT * FROM FW_Profiles LIMIT %s OFFSET %s",
                     args
                 )
             columns = get_columns(cursor)
             rows = cursor.fetchall()
             data = [dict(zip(columns, row)) for row in rows] if columns and rows else []
             if login:
-                cursor.execute("SELECT COUNT(*) FROM firewall_profiles WHERE login = %s", (login,))
+                cursor.execute("SELECT COUNT(*) FROM FW_Profiles WHERE login = %s", (login,))
             else:
-                cursor.execute("SELECT COUNT(*) FROM firewall_profiles")
+                cursor.execute("SELECT COUNT(*) FROM FW_Profiles")
             total = cursor.fetchone()[0]
         return resp(data=data, total=total, page=page, page_size=page_size)
     except Exception as e:
@@ -91,7 +91,7 @@ def list_firewall_profiles(page: int = 1, page_size: int = 25, login: Optional[s
 def get_firewall_profile(id: int):
     try:
         with db() as (cnx, cursor):
-            cursor.execute("SELECT * FROM firewall_profiles WHERE id = %s", (id,))
+            cursor.execute("SELECT * FROM FW_Profiles WHERE id = %s", (id,))
             row = cursor.fetchone()
             if not row:
                 return resp(False, error="Not found")
@@ -110,7 +110,7 @@ def create_firewall_profile(profile: FirewallProfileIn = Body(...)):
         hash_val = hashlib.md5(f"{profile.tcp_rules}|{profile.udp_rules}".encode()).hexdigest()
         with db() as (cnx, cursor):
             cursor.execute(
-                "INSERT INTO firewall_profiles (profile_type, can_delete, profile_name, created_at, updated_at, name, login, ip_pool, ip_v6_pool, region_id, tcp_rules, udp_rules, firewall_profile, hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "INSERT INTO FW_Profiles (profile_type, can_delete, profile_name, created_at, updated_at, name, login, ip_pool, ip_v6_pool, region_id, tcp_rules, udp_rules, firewall_profile, hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (profile.profile_type, profile.can_delete, profile.profile_name, profile.created_at, profile.updated_at, profile.name, profile.login, profile.ip_pool, profile.ip_v6_pool, profile.region_id, profile.tcp_rules, profile.udp_rules, profile.firewall_profile, hash_val)
             )
             cnx.commit()
@@ -132,13 +132,13 @@ def update_firewall_profile(id: int, profile: FirewallProfileIn = Body(...)):
             return resp(False, error="RADIUS Accounting-Start не найден после 3 попыток", comment="Ожидание RADIUS Accounting-Start...")
 
         with db() as (cnx, cursor):
-            cursor.execute("SELECT hash FROM firewall_profiles WHERE id = %s", (id,))
+            cursor.execute("SELECT hash FROM FW_Profiles WHERE id = %s", (id,))
             old_hash_row = cursor.fetchone()
             old_hash = old_hash_row[0] if old_hash_row else None
 
             hash_val = hashlib.md5(f"{profile.tcp_rules}|{profile.udp_rules}".encode()).hexdigest()
             cursor.execute(
-                """INSERT INTO firewall_profiles (id, profile_type, can_delete, profile_name, created_at, updated_at, name, login, ip_pool, ip_v6_pool, region_id, tcp_rules, udp_rules, firewall_profile, hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                """INSERT INTO FW_Profiles (id, profile_type, can_delete, profile_name, created_at, updated_at, name, login, ip_pool, ip_v6_pool, region_id, tcp_rules, udp_rules, firewall_profile, hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (id, profile.profile_type, profile.can_delete, profile.profile_name, profile.created_at, profile.updated_at, profile.name, profile.login, profile.ip_pool, profile.ip_v6_pool, profile.region_id, profile.tcp_rules, profile.udp_rules, profile.firewall_profile, hash_val)
             )
             cnx.commit()
@@ -155,7 +155,7 @@ def update_firewall_profile(id: int, profile: FirewallProfileIn = Body(...)):
 def delete_firewall_profile(id: int):
     try:
         with db() as (cnx, cursor):
-            cursor.execute("SELECT login, tcp_rules, udp_rules, policy_id, hash FROM firewall_profiles WHERE id = %s", (id,))
+            cursor.execute("SELECT login, tcp_rules, udp_rules, policy_id, hash FROM FW_Profiles WHERE id = %s", (id,))
             row = cursor.fetchone()
             if not row or not row[0]:
                 return resp(False, error="Профиль не найден")
@@ -166,7 +166,7 @@ def delete_firewall_profile(id: int):
             return resp(False, error="RADIUS Accounting-Start не найден после 3 попыток", comment="Ожидание RADIUS Accounting-Start...")
 
         with db() as (cnx, cursor):
-            cursor.execute("DELETE FROM firewall_profiles WHERE id = %s", (id,))
+            cursor.execute("DELETE FROM FW_Profiles WHERE id = %s", (id,))
             cnx.commit()
             joined = radius_data.copy()
             joined.update({'tcp_rules': tcp_rules, 'udp_rules': udp_rules, 'policy_id': policy_id, 'hash': hash_val})
@@ -184,7 +184,7 @@ def check_radius_message(login: str = Query(...)):
     """
     try:
         with db() as (cnx, cursor):
-            cursor.execute("SELECT * FROM A WHERE User_Name = %s", (login,))
+            cursor.execute("SELECT * FROM RADIUS_Sessions WHERE User_Name = %s", (login,))
             row = cursor.fetchone()
             if row:
                 columns = get_columns(cursor)

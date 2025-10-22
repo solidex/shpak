@@ -1,0 +1,54 @@
+---
+apiVersion: "cilium.io/v2"
+kind: CiliumEgressGatewayPolicy
+metadata:
+  name: mhe-fortiapi-egress
+spec:
+  selectors:
+  - podSelector:
+      matchLabels:
+        app: mhe-fortiapi
+  destinationCIDRs:
+  - "0.0.0.0/0"
+  egressGateway:
+    nodeSelector:
+      matchLabels:
+        egress-gateway: "true"
+    egressIP: 10.3.11.201
+
+---
+apiVersion: "cilium.io/v2"
+kind: CiliumEgressGatewayPolicy
+metadata:
+  name: mhe-ldap-egress
+spec:
+  selectors:
+  - podSelector:
+      matchLabels:
+        app: mhe-ldap
+  destinationCIDRs:
+  - "0.0.0.0/0"
+  egressGateway:
+    nodeSelector:
+      matchLabels:
+        egress-gateway: "true"
+    egressIP: 10.3.11.202
+
+---
+apiVersion: "cilium.io/v2"
+kind: CiliumEgressGatewayPolicy
+metadata:
+  name: mhe-email-egress
+spec:
+  selectors:
+  - podSelector:
+      matchLabels:
+        app: mhe-email
+  destinationCIDRs:
+  - "0.0.0.0/0"
+  egressGateway:
+    nodeSelector:
+      matchLabels:
+        egress-gateway: "true"
+    egressIP: 10.3.11.203
+

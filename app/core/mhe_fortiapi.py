@@ -1,6 +1,8 @@
 import logging
 import json
 import requests
+from pathlib import Path
+from logging.handlers import RotatingFileHandler
 from fastapi import FastAPI
 from app.config.env import st
 from app.models.fortigate_models import (
@@ -9,6 +11,12 @@ from app.models.fortigate_models import (
 )
 
 logger = logging.getLogger("mhe_fortiapi")
+if not logger.handlers:
+    Path("logs").mkdir(exist_ok=True)
+    handler = RotatingFileHandler("logs/mhe_fortiapi.log", maxBytes=10*1024*1024, backupCount=5, encoding="utf-8")
+    handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s'))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 app = FastAPI()
 
 API_TOKEN = st.API_TOKEN
@@ -19,10 +27,12 @@ def _headers():
         'Content-Type': 'application/json'
     }
 
+_SESSION = requests.Session()
+
 def _req(method, url, data=None):
     try:
         payload = json.dumps(data) if data is not None and not isinstance(data, str) else data
-        resp = requests.request(method, url, headers=_headers(), data=payload, verify=False, timeout=5)
+        resp = _SESSION.request(method.upper(), url, headers=_headers(), data=payload, verify=False, timeout=3)
         if resp.ok:
             try:
                 return resp.json()

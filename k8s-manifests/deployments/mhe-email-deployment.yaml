@@ -1,0 +1,57 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mhe-email
+  namespace: default
+  labels:
+    app: mhe-email
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mhe-email
+  template:
+    metadata:
+      labels:
+        app: mhe-email
+    spec:
+      containers:
+      - name: mhe-email
+        image: shpak-k8s:latest
+        command: ["python", "-m", "app.core.mhe_email"]
+        ports:
+        - containerPort: 80
+          name: http
+        env:
+        - name: SMTP_SERVER
+          value: "smtp.example.com"
+        - name: SMTP_PORT
+          value: "587"
+        - name: MHE_DB_HOST
+          value: "mhe-db-service"
+        - name: MHE_DB_PORT
+          value: "80"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mhe-email-service
+  namespace: default
+spec:
+  selector:
+    app: mhe-email
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: ClusterIP
+

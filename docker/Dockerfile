@@ -16,8 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better layer caching
-COPY docker/requirements.txt /opt/app/requirements.txt
+# Copy minimal requirements first for better layer caching
+COPY config/requirements.txt /opt/app/requirements.txt
 RUN pip install --upgrade pip && \
     pip install -r /opt/app/requirements.txt
 

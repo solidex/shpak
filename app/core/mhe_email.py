@@ -39,12 +39,15 @@ app = FastAPI(title="MHE Email Service")
 def _sign(payload: dict, secret: str) -> str:
     data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()
     sig = hmac.new(secret.encode(), data, hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(data + b"." + sig).decode()
+    combined = data + b":" + sig
+    return base64.urlsafe_b64encode(combined).decode()
 
 def _unsign(token: str, secret: str):
     try:
         raw = base64.urlsafe_b64decode(token.encode())
-        data, _, sig = raw.rpartition(b".")
+        data, _, sig = raw.rpartition(b":")
+        if not sig:
+            return None
         good = hmac.new(secret.encode(), data, hashlib.sha256).digest()
         if not hmac.compare_digest(sig, good):
             return None
@@ -86,7 +89,8 @@ def send_email_smtp(to_emails, subject, body) -> bool:
 # --- DB Query ---
 def query_utmlogs_by_user_and_day(login, date_start, date_end):
     try:
-        cnx = mysql.connector.connect(**st.mysql_config)
+        # StarRocks (MySQL protocol) as primary analytical store
+        cnx = mysql.connector.connect(**getattr(st, 'starrocks_config', st.mysql_config))
         cursor = cnx.cursor()
         cols = ", ".join(f"`{c}`" for c in EXTENDED_COLUMNS)
         cursor.execute(

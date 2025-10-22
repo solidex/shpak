@@ -3,8 +3,17 @@ import logging
 from fastapi import FastAPI, Request
 from app.config.env import st
 import requests
+from pathlib import Path
+from logging.handlers import RotatingFileHandler
 
 logger = logging.getLogger("mhe_ae")
+# Ensure file-based rotating logs (no console spam)
+if not logger.handlers:
+    Path("logs").mkdir(exist_ok=True)
+    handler = RotatingFileHandler("logs/mhe_ae.log", maxBytes=10*1024*1024, backupCount=5, encoding="utf-8")
+    handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s'))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 app = FastAPI()
 
 MHE_DB_URL = f"http://{st.MHE_DB_HOST}:{st.MHE_DB_PORT}"
@@ -28,9 +37,12 @@ def _invert_rules(selected_tcp, selected_udp):
         ','.join([p for p in ALL_UDP if p not in select(selected_udp, ALL_UDP)]),
     )
 
+_SESSION = requests.Session()
+
 def _req(method, url, **kwargs):
     try:
-        return getattr(requests, method)(url, timeout=5, **kwargs)
+        timeout = kwargs.pop("timeout", 3)
+        return _SESSION.request(method.upper(), url, timeout=timeout, **kwargs)
     except Exception as e:
         logger.error(f"{method.upper()} {url} failed: {e}")
 
@@ -112,7 +124,6 @@ def handle_edit(data):
             new_policy_id = resp.json().get("mkey") if resp else None
             if new_policy_id:
                 _post(f"{MHE_DB_URL}/firewall_profiles/update_policy_id", json={"login": user, "hash": hash_val, "policy_id": new_policy_id})
-                _post(f"{MHE_DB_URL}/policy_logs", json={"user": user, "fg": fg, "response": {"mkey": new_policy_id, "action": "add"}})
             return {"migrated_to_new_policy": True, "new_policy_id": new_policy_id}
         else:  # оба True
             _post(f"{FG_URL}/edit_policy", json={"fg_addr": fg, "action": "remove", "policy_id": policy_id, "extra": {"user": user}})
@@ -141,7 +152,6 @@ def handle_delete(data):
             _post(f"{FG_URL}/delete_service", json={"fg_addr": fg, "name": hash_val})
             _post(f"{FG_URL}/delete_ip", json={"fg_addr": fg, "name": user})
             _post(f"{FG_URL}/delete_ipv6", json={"fg_addr": fg, "name": user})
-            _post(f"{MHE_DB_URL}/policy_logs", json={"user": user, "fg": fg, "response": {"mkey": policy_id, "action": "delete"}})
             return {"deleted_policy": True}
         else:
             _post(f"{FG_URL}/edit_policy", json={"fg_addr": fg, "action": "remove", "policy_id": policy_id, "extra": {"user": user}})

@@ -1,0 +1,126 @@
+# =================================================================
+# StarRocks Helm Values - NodePort + Dynamic PVC
+# =================================================================
+# Использование:
+#   helm install starrocks starrocks/kube-starrocks \
+#     -n starrocks -f starrocks-values.yaml
+# =================================================================
+
+# --- Общие настройки ---
+starrocks:
+  # Установка пароля для root пользователя
+  initPassword:
+    enabled: true
+    # Секрет должен быть создан заранее:
+    # kubectl create secret generic starrocks-root-pass \
+    #   --from-literal=password='YourStrongPassword123!' -n starrocks
+    passwordSecret: starrocks-root-pass
+
+  # --- Frontend (FE) Configuration ---
+  starrocksFESpec:
+    # Высокая доступность - 3 реплики
+    replicas: 3
+    
+    # Образ StarRocks FE
+    image:
+      repository: starrocks/fe-ubuntu
+      tag: "3.2-latest"
+    
+    # Ресурсы для FE
+    resources:
+      requests:
+        cpu: 500m      # 0.5 CPU
+        memory: 2Gi    # 2 GB RAM
+      limits:
+        cpu: 2         # 2 CPU
+        memory: 4Gi    # 4 GB RAM
+    
+    # Хранилище метаданных (динамический PVC)
+    storageSpec:
+      name: fe
+      # StorageClass (пустое значение = default StorageClass)
+      storageClassName: ""
+      # Размер хранилища для метаданных
+      storageSize: 10Gi
+      
+    # NodePort для доступа извне
+    service:
+      type: NodePort
+      ports:
+        # MySQL протокол (query_port)
+        - name: query
+          port: 9030
+          containerPort: 9030
+          nodePort: 30030  # Доступ: mysql -h <node-ip> -P 30030
+        # HTTP API и Web UI
+        - name: http
+          port: 8030
+          containerPort: 8030
+          nodePort: 30080  # Web UI: http://<node-ip>:30080
+
+  # --- Backend (BE) Configuration ---
+  starrockBeSpec:
+    # Высокая доступность - 3 реплики
+    replicas: 3
+    
+    # Образ StarRocks BE
+    image:
+      repository: starrocks/be-ubuntu
+      tag: "3.2-latest"
+    
+    # Ресурсы для BE
+    resources:
+      requests:
+        cpu: 1         # 1 CPU
+        memory: 4Gi    # 4 GB RAM
+      limits:
+        cpu: 4         # 4 CPU
+        memory: 8Gi    # 8 GB RAM
+    
+    # Хранилище данных (динамический PVC)
+    storageSpec:
+      name: be
+      # StorageClass (пустое значение = default StorageClass)
+      storageClassName: ""
+      # Размер хранилища для данных (основное хранилище)
+      storageSize: 50Gi
+    
+    # NodePort для загрузки данных
+    service:
+      type: NodePort
+      ports:
+        # BE порт для загрузки данных
+        - name: be
+          port: 9060
+          containerPort: 9060
+          nodePort: 30060  # Stream Load: http://<node-ip>:30060
+        # BE WebServer
+        - name: webserver
+          port: 8040
+          containerPort: 8040
+          nodePort: 30040  # http://<node-ip>:30040
+        # Heartbeat порт (internal)
+        - name: heartbeat
+          port: 9050
+          containerPort: 9050
+        # BRPC порт (internal)
+        - name: brpc
+          port: 8060
+          containerPort: 8060
+
+# --- Operator Configuration ---
+operator:
+  # Образ StarRocks оператора
+  image:
+    repository: starrocks/operator
+    tag: "v1.9.7"
+  
+  # Ресурсы для оператора
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+

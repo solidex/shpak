@@ -23,12 +23,22 @@ class _Settings:
     # Email token (separate secret used to sign report links)
     EMAIL_TOKEN: str = _get("EMAIL_TOKEN", "email-secret")
 
-    # MySQL settings (legacy block left for compatibility)
+    # StarRocks settings (primary analytical store)
+    # StarRocks speaks MySQL protocol, so we use the same connector interface
+    starrocks_config: Dict[str, Any] = {
+        'user': _get('STARROCKS_USER', 'root'),
+        'password': _get('STARROCKS_PASSWORD', ''),
+        'host': _get('STARROCKS_HOST', '127.0.0.1'),
+        'database': _get('STARROCKS_DB', 'RADIUS'),
+        'port': _get('STARROCKS_PORT', 9030, int),
+    }
+
+    # MySQL settings (legacy, not used when StarRocks is enabled)
     mysql_config: Dict[str, Any] = {
         'user': _get('MYSQL_USER', 'root'),
         'password': _get('MYSQL_PASSWORD', ''),
         'host': _get('MYSQL_HOST', '127.0.0.1'),
-        'database': _get('MYSQL_DB', 'Radius'),
+        'database': _get('MYSQL_DB', 'RADIUS'),
         'port': _get('MYSQL_PORT', '3306'),
         'use_pure': _get('MYSQL_USE_PURE', 'True'),
     }

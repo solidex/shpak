@@ -1,0 +1,53 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mhe-ldap
+  namespace: default
+  labels:
+    app: mhe-ldap
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mhe-ldap
+  template:
+    metadata:
+      labels:
+        app: mhe-ldap
+    spec:
+      containers:
+      - name: mhe-ldap
+        image: shpak-k8s:latest
+        command: ["python", "-m", "app.core.mhe_ldap"]
+        ports:
+        - containerPort: 80
+          name: http
+        env:
+        - name: LDAP_SERVER
+          value: "ldap.example.com"
+        - name: LDAP_PORT
+          value: "389"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mhe-ldap-service
+  namespace: default
+spec:
+  selector:
+    app: mhe-ldap
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: ClusterIP
+

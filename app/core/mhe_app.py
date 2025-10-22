@@ -12,8 +12,16 @@ from app.models.fastclass import (
 from pydantic import BaseModel
 from app.config.env import st
 import requests
+from pathlib import Path
+from logging.handlers import RotatingFileHandler
 
 logger = logging.getLogger("mhe_app")
+if not logger.handlers:
+    Path("logs").mkdir(exist_ok=True)
+    handler = RotatingFileHandler("logs/mhe_app.log", maxBytes=10*1024*1024, backupCount=5, encoding="utf-8")
+    handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s'))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 app = FastAPI()
 
 MHE_DB_URL = f"http://{st.MHE_DB_HOST}:{st.MHE_DB_PORT}"
@@ -21,9 +29,11 @@ MHE_DB_URL = f"http://{st.MHE_DB_HOST}:{st.MHE_DB_PORT}"
 class KeepaliveRequest(BaseModel):
     login: str
 
+_SESSION = requests.Session()
+
 def db_request(method: str, path: str, **kwargs):
     try:
-        resp = requests.request(method, f"{MHE_DB_URL}{path}", timeout=5, **kwargs)
+        resp = _SESSION.request(method.upper(), f"{MHE_DB_URL}{path}", timeout=3, **kwargs)
         resp.raise_for_status()
         js = resp.json()
         if not js.get("success", True):
@@ -125,7 +135,7 @@ async def receive_keepalive(keepalive_data: KeepaliveRequest = Body(...)):
     logger.info(f"Received keepalive for login: {login}")
     try:
         url = f"http://{st.MHE_AE_HOST}:{st.MHE_AE_PORT}/keepalive"
-        result = requests.post(url, json={"login": login}, timeout=2)
+        result = _SESSION.post(url, json={"login": login}, timeout=2)
         if result.status_code == 200:
             return {"success": True, "message": f"Keepalive forwarded for {login}"}
         return {"success": False, "error": f"Failed to forward keepalive, status: {result.status_code}"}

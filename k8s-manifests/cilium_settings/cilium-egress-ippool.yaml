@@ -1,0 +1,17 @@
+---
+# Отдельный IP pool для egress gateway
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: "egress-pool"
+spec:
+  blocks:
+  - start: "10.3.11.200"
+    stop:  "10.3.11.207"  # Диапазон: 10.3.11.200-10.3.11.207 (8 адресов)
+  serviceSelector:
+    matchExpressions:
+    - key: io.cilium.gateway/egress
+      operator: In
+      values:
+      - "true"
+
