@@ -1,13 +1,33 @@
 from fastapi import APIRouter
 from app.models.models import RadiusEvent, SimpleResponse
 import mysql.connector
+from mysql.connector import pooling
 from app.config.env import st
 from datetime import datetime
 import requests
 import logging
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Connection Pool for parallel RADIUS event processing
+try:
+    db_pool = pooling.MySQLConnectionPool(
+        pool_name="radius_pool",
+        pool_size=50,  # Handle up to 50 concurrent RADIUS events
+        pool_reset_session=True,
+        **getattr(st, 'starrocks_config', st.mysql_config)
+    )
+    logger.info("RADIUS connection pool created (size=50)")
+except Exception as e:
+    logger.error(f"Failed to create RADIUS connection pool: {e}")
+    db_pool = None
+
+# Thread pool for blocking I/O (DB queries, HTTP requests)
+executor = ThreadPoolExecutor(max_workers=100, thread_name_prefix="radius_worker")
+logger.info("RADIUS thread pool executor created (max_workers=100)")
 
 # StarRocks Stream Load settings
 STARROCKS_HOST = st.starrocks_config.get('host', '127.0.0.1')
@@ -64,10 +84,9 @@ def send_signal(action, data):
     except Exception as e:
         logger.warning(f"Failed to send signal to MHE_AE: {e}")
 
-@router.post("/event", response_model=SimpleResponse)
-def receive_radius_event(event: RadiusEvent):
+def process_radius_event_sync(attrs: dict):
+    """Process single RADIUS event (thread-safe, for parallel execution)"""
     try:
-        attrs = event.attrs
         acct_status = attrs.get('Acct-Status-Type', '').lower()
         class_val = str(attrs.get('Class', ''))
         user_name = attrs.get('User-Name', '')
@@ -75,7 +94,7 @@ def receive_radius_event(event: RadiusEvent):
         # Only consider classes that matter
         valid_classes = {'2', '00000002', b'2', b'00000002'}
         if class_val not in valid_classes:
-            return resp()  # Ignored event (nothing to do)
+            return {"success": True, "skipped": True}
 
         # Process RADIUS event
         if acct_status == 'start':
@@ -92,8 +111,8 @@ def receive_radius_event(event: RadiusEvent):
             if not insert_ok:
                 logger.warning(f"Stream Load failed for RADIUS start: user={user_name}")
             
-            # Check if firewall profile exists (only SELECT, minimal DB load)
-            cnx = mysql.connector.connect(**getattr(st, 'starrocks_config', st.mysql_config))
+            # Check if firewall profile exists (use connection pool)
+            cnx = db_pool.get_connection() if db_pool else mysql.connector.connect(**getattr(st, 'starrocks_config', st.mysql_config))
             cursor = cnx.cursor()
             try:
                 cursor.execute("SELECT tcp_rules, udp_rules FROM FW_Profiles WHERE login = %s", (user_name,))
@@ -109,8 +128,8 @@ def receive_radius_event(event: RadiusEvent):
             logger.info(f"RADIUS start event processed: user={user_name}")
 
         elif acct_status == 'stop':
-            # DELETE and SELECT still via SQL (Stream Load doesn't support DELETE)
-            cnx = mysql.connector.connect(**getattr(st, 'starrocks_config', st.mysql_config))
+            # DELETE and SELECT via SQL (use connection pool)
+            cnx = db_pool.get_connection() if db_pool else mysql.connector.connect(**getattr(st, 'starrocks_config', st.mysql_config))
             cursor = cnx.cursor()
             try:
                 cursor.execute("DELETE FROM RADIUS_Sessions WHERE User_Name = %s", (user_name,))
@@ -127,7 +146,19 @@ def receive_radius_event(event: RadiusEvent):
             
             logger.info(f"RADIUS stop event processed: user={user_name}")
 
-        return resp()
+        return {"success": True}
     except Exception as e:
         logger.error(f"Failed to process RADIUS event: {e}")
+        return {"success": False, "error": str(e)}
+
+@router.post("/event", response_model=SimpleResponse)
+async def receive_radius_event(event: RadiusEvent):
+    """Receive RADIUS event and process it asynchronously (non-blocking)"""
+    try:
+        # Process in thread pool (non-blocking for other requests)
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(executor, process_radius_event_sync, event.attrs)
+        return resp(**result)
+    except Exception as e:
+        logger.error(f"Failed to queue RADIUS event: {e}")
         return resp(False, error=str(e))

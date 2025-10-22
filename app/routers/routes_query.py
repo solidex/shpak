@@ -2,17 +2,37 @@ import logging
 from fastapi import APIRouter, Body
 from app.models.models import ItemResponse
 import mysql.connector
+from mysql.connector import pooling
 from app.config.env import st
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Connection Pool for better performance
+try:
+    db_pool = pooling.MySQLConnectionPool(
+        pool_name="query_pool",
+        pool_size=20,
+        pool_reset_session=True,
+        **getattr(st, 'starrocks_config', st.mysql_config)
+    )
+    logger.info("Query connection pool created (size=20)")
+except Exception as e:
+    logger.error(f"Failed to create query connection pool: {e}")
+    db_pool = None
+
 def query_db(query, params):
+    """Execute DB query (uses connection pool if available)"""
     try:
-        with mysql.connector.connect(**getattr(st, 'starrocks_config', st.mysql_config)) as cnx:
-            with cnx.cursor() as cursor:
-                cursor.execute(query, params)
-                return cursor.fetchall()
+        cnx = db_pool.get_connection() if db_pool else mysql.connector.connect(**getattr(st, 'starrocks_config', st.mysql_config))
+        cursor = cnx.cursor()
+        try:
+            cursor.execute(query, params)
+            result = cursor.fetchall()
+            return result
+        finally:
+            cursor.close()
+            cnx.close()
     except Exception as e:
         raise RuntimeError(str(e))
 

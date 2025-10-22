@@ -1,16 +1,31 @@
 from fastapi import APIRouter, Query, Body
 from typing import Optional
 from app.models.models import FirewallProfileIn, ListResponse, ItemResponse, SimpleResponse
-import mysql.connector, requests, hashlib, time, logging
+import mysql.connector, requests, hashlib, time, logging, asyncio
+from mysql.connector import pooling
 from app.config.env import st
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Connection Pool for better performance
+try:
+    db_pool = pooling.MySQLConnectionPool(
+        pool_name="firewall_pool",
+        pool_size=30,
+        pool_reset_session=True,
+        **getattr(st, 'starrocks_config', st.mysql_config)
+    )
+    logger.info("Firewall connection pool created (size=30)")
+except Exception as e:
+    logger.error(f"Failed to create firewall connection pool: {e}")
+    db_pool = None
+
 @contextmanager
 def db():
-    cnx = mysql.connector.connect(**getattr(st, 'starrocks_config', st.mysql_config))
+    """Context manager for DB connections (uses connection pool if available)"""
+    cnx = db_pool.get_connection() if db_pool else mysql.connector.connect(**getattr(st, 'starrocks_config', st.mysql_config))
     cursor = cnx.cursor()
     try:
         yield cnx, cursor
@@ -39,9 +54,9 @@ def send_signal(action, data):
 def get_columns(cursor):
     return [col[0] for col in cursor.description] if cursor.description else []
 
-def check_radius_with_keepalive(login: str, max_attempts: int = 3, delay: float = 0.5):
+async def check_radius_with_keepalive(login: str, max_attempts: int = 3, delay: float = 0.5):
     """
-    Проверка сообщения в RADIUS, с periodic keepalive и паузой.
+    Проверка сообщения в RADIUS, с periodic keepalive и паузой (async, non-blocking).
     """
     for attempt in range(max_attempts):
         with db() as (cnx, cursor):
@@ -55,7 +70,7 @@ def check_radius_with_keepalive(login: str, max_attempts: int = 3, delay: float 
                 requests.post(MHE_APP_URL, json={"login": login}, timeout=1)
             except Exception:
                 pass
-            time.sleep(delay)
+            await asyncio.sleep(delay)  # Non-blocking sleep
     return False, None
 
 @router.get("/firewall_profiles", response_model=ListResponse)
@@ -102,9 +117,9 @@ def get_firewall_profile(id: int):
         return resp(False, error=str(e))
 
 @router.post("/firewall_profiles", response_model=ItemResponse)
-def create_firewall_profile(profile: FirewallProfileIn = Body(...)):
+async def create_firewall_profile(profile: FirewallProfileIn = Body(...)):
     try:
-        found, radius_data = check_radius_with_keepalive(profile.login)
+        found, radius_data = await check_radius_with_keepalive(profile.login)
         if not found:
             return resp(False, error="RADIUS Accounting-Start не найден после 3 попыток", comment="Ожидание RADIUS Accounting-Start...")
         hash_val = hashlib.md5(f"{profile.tcp_rules}|{profile.udp_rules}".encode()).hexdigest()
@@ -125,9 +140,9 @@ def create_firewall_profile(profile: FirewallProfileIn = Body(...)):
         return resp(False, error=str(e))
 
 @router.put("/firewall_profiles/{id}", response_model=ItemResponse)
-def update_firewall_profile(id: int, profile: FirewallProfileIn = Body(...)):
+async def update_firewall_profile(id: int, profile: FirewallProfileIn = Body(...)):
     try:
-        found, radius_data = check_radius_with_keepalive(profile.login)
+        found, radius_data = await check_radius_with_keepalive(profile.login)
         if not found:
             return resp(False, error="RADIUS Accounting-Start не найден после 3 попыток", comment="Ожидание RADIUS Accounting-Start...")
 
@@ -152,7 +167,7 @@ def update_firewall_profile(id: int, profile: FirewallProfileIn = Body(...)):
         return resp(False, error=str(e))
 
 @router.delete("/firewall_profiles/{id}", response_model=SimpleResponse)
-def delete_firewall_profile(id: int):
+async def delete_firewall_profile(id: int):
     try:
         with db() as (cnx, cursor):
             cursor.execute("SELECT login, tcp_rules, udp_rules, policy_id, hash FROM FW_Profiles WHERE id = %s", (id,))
@@ -161,7 +176,7 @@ def delete_firewall_profile(id: int):
                 return resp(False, error="Профиль не найден")
             login, tcp_rules, udp_rules, policy_id, hash_val = row
 
-        found, radius_data = check_radius_with_keepalive(login)
+        found, radius_data = await check_radius_with_keepalive(login)
         if not found:
             return resp(False, error="RADIUS Accounting-Start не найден после 3 попыток", comment="Ожидание RADIUS Accounting-Start...")
 

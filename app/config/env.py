@@ -43,27 +43,6 @@ class _Settings:
         'use_pure': _get('MYSQL_USE_PURE', 'True'),
     }
 
-    # Default FortiGate policy payload (data section) aligned with current API usage
-    default_policy: Dict[str, Any] = {
-        "action": _get("DEFAULT_POLICY_ACTION", "deny"),
-        "srcintf": [{"name": _get("DEFAULT_POLICY_SRCINTF", "PPPoE_vlan")}],
-        "dstintf": [{"name": _get("DEFAULT_POLICY_DSTINTF", "Core_vlan")}],
-        "dstaddr": [
-            {"name": _get("DEFAULT_POLICY_DSTADDR1", "ns3.belpak.by_ipv4")},
-            {"name": _get("DEFAULT_POLICY_DSTADDR2", "ns4.belpak.by_ipv4")},
-        ],
-        "dstaddr6": [
-            {"name": _get("DEFAULT_POLICY_DSTADDR6_1", "ns3.belpak.by_ipv6")},
-            {"name": _get("DEFAULT_POLICY_DSTADDR6_2", "ns4.belpak.by_ipv6")},
-        ],
-        "schedule": _get("DEFAULT_POLICY_SCHEDULE", "always"),
-        "ssl-ssh-profile": _get("DEFAULT_POLICY_SSL_SSH_PROFILE", ""),
-        "logtraffic": _get("DEFAULT_POLICY_LOGTRAFFIC", "disable"),
-        "groups": [{"name": _get("DEFAULT_POLICY_GROUP", "class2")}],
-        "dstaddr-negate": _get("DEFAULT_POLICY_DSTADDR_NEGATE", "enable"),
-        "dstaddr6-negate": _get("DEFAULT_POLICY_DSTADDR6_NEGATE", "enable"),
-    }
-
     # RADIUS
     RADIUS_SERVER_IP = [s.strip() for s in _get("RADIUS_SERVER_IP", "").split(",") if s.strip()]
     RADIUS_SHARED_SECRET = _get("RADIUS_SHARED_SECRET", "testing123").encode()
