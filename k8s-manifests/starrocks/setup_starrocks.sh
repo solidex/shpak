@@ -336,20 +336,30 @@ cmd_install() {
     print_success "StarRocks installation started"
     echo ""
     
-    # Wait for FE
-    wait_for_pods "fe" 600 || {
-        print_warning "FE pods not ready, but continuing..."
-        echo -e "${YELLOW}Run './setup_starrocks.sh status' to check progress${NC}"
-        echo -e "${YELLOW}Run './setup_starrocks.sh init' when pods are ready${NC}"
-    }
-    
-    # Wait for BE
-    wait_for_pods "be" 600 || {
-        print_warning "BE pods not ready, but continuing..."
-    }
-    
     echo ""
-    print_success "StarRocks installed successfully!"
+    
+    # Wait for FE
+    if wait_for_pods "fe" 600; then
+        print_success "FE pods are ready!"
+        
+        # Wait for BE
+        if wait_for_pods "be" 600; then
+            print_success "BE pods are ready!"
+            echo ""
+            print_success "StarRocks installed successfully!"
+        else
+            print_warning "BE pods not ready yet"
+            echo ""
+            print_warning "StarRocks installation started, but not fully ready"
+        fi
+    else
+        print_warning "FE pods not ready yet"
+        echo ""
+        print_warning "StarRocks installation started, but not fully ready"
+        echo -e "${YELLOW}Check status: ./setup_starrocks.sh status${NC}"
+        echo -e "${YELLOW}Wait 5-10 minutes, then run: ./setup_starrocks.sh init${NC}"
+    fi
+    
     echo ""
     
     # Show connection info
