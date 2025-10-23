@@ -85,24 +85,23 @@ check_dependencies() {
 }
 
 get_service_info() {
-    local svc_name="starrocks-fe-service"
+    # Проверяем реальное имя сервиса (может быть starrocks-fe-service или kube-starrocks-fe-service)
+    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep fe-service | head -1 | cut -d'/' -f2)
+    
+    if [ -z "$svc_name" ]; then
+        echo "NotFound"
+        return
+    fi
+    
     local svc_type=$($KUBECTL get svc "$svc_name" -n "$NAMESPACE" -o jsonpath='{.spec.type}' 2>/dev/null)
     
-    if [ "$svc_type" == "ClusterIP" ]; then
-        echo "ClusterIP"
-    else
-        # NodePort or LoadBalancer
-        local node_ip=$($KUBECTL get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
-        if [ -z "$node_ip" ]; then
-            node_ip=$($KUBECTL get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}' 2>/dev/null)
-        fi
-        echo "$node_ip"
-    fi
+    echo "$svc_type"
 }
 
 start_port_forward() {
     print_step "Starting port-forward for MySQL connection..."
-    $KUBECTL port-forward -n "$NAMESPACE" svc/starrocks-fe-service 9030:9030 &>/dev/null &
+    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep fe-service | head -1 | cut -d'/' -f2)
+    $KUBECTL port-forward -n "$NAMESPACE" svc/$svc_name 9030:9030 &>/dev/null &
     local pf_pid=$!
     sleep 2
     echo "$pf_pid"
@@ -122,6 +121,12 @@ wait_for_pods() {
         return 0
     else
         print_warning "$component pods not ready yet"
+        echo ""
+        print_step "Checking pod status..."
+        $KUBECTL get pods -n "$NAMESPACE" -l app.kubernetes.io/component=$component
+        echo ""
+        print_step "Checking events..."
+        $KUBECTL get events -n "$NAMESPACE" --sort-by='.lastTimestamp' | tail -20
         return 1
     fi
 }
@@ -211,12 +216,21 @@ cmd_all() {
     print_header "Setup Complete!"
     echo ""
     echo -e "${GREEN}StarRocks is ready!${NC}"
-    echo -e "${CYAN}Static IPs:${NC}"
-    echo -e "  FE: ${GREEN}10.152.183.10:9030${NC}"
-    echo -e "  BE: ${GREEN}10.152.183.11:9060${NC}"
+    
+    # Show actual ClusterIP
+    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep fe-service | head -1 | cut -d'/' -f2)
+    local cluster_ip=$($KUBECTL get svc "$svc_name" -n "$NAMESPACE" -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
+    
+    echo -e "${CYAN}ClusterIP:${NC}"
+    echo -e "  FE: ${GREEN}$cluster_ip:9030${NC}"
+    
+    if [ "$cluster_ip" != "10.152.183.10" ]; then
+        echo -e "  ${YELLOW}⚠️  Static IP 10.152.183.10 not applied (may be in use)${NC}"
+    fi
+    
     echo ""
     echo -e "${CYAN}Connection:${NC}"
-    echo -e "  From inside cluster: ${GREEN}mysql -h 10.152.183.10 -P 9030 -u root -p${NC}"
+    echo -e "  From inside cluster: ${GREEN}mysql -h $cluster_ip -P 9030 -u root -p${NC}"
     echo -e "  From outside: ${GREEN}./setup_starrocks.sh port-forward${NC}"
     echo ""
 }
@@ -317,19 +331,26 @@ cmd_install() {
     echo ""
     
     # Show connection info
-    local svc_info=$(get_service_info)
+    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep fe-service | head -1 | cut -d'/' -f2)
+    local cluster_ip=$($KUBECTL get svc "$svc_name" -n "$NAMESPACE" -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
+    
     echo -e "${CYAN}Connection details:${NC}"
-    if [ "$svc_info" == "ClusterIP" ]; then
-        echo -e "  ${YELLOW}Service type: ClusterIP (internal only)${NC}"
-        echo -e "  ${GREEN}From inside cluster:${NC}"
-        echo -e "    mysql -h starrocks-fe-service.$NAMESPACE.svc.cluster.local -P 9030 -u root -p"
-        echo -e "  ${GREEN}From outside cluster:${NC}"
-        echo -e "    $KUBECTL port-forward -n $NAMESPACE svc/starrocks-fe-service 9030:9030"
-        echo -e "    mysql -h 127.0.0.1 -P 9030 -u root -p"
-    else
-        echo -e "  MySQL:  ${GREEN}mysql -h $svc_info -P $STARROCKS_PORT -u root -p${NC}"
-        echo -e "  Web UI: ${GREEN}http://$svc_info:30080${NC}"
+    echo -e "  ${YELLOW}Service type: ClusterIP${NC}"
+    echo -e "  ${GREEN}ClusterIP: $cluster_ip${NC}"
+    
+    # Warn if static IP not applied
+    if [ "$cluster_ip" != "10.152.183.10" ]; then
+        echo -e "  ${YELLOW}⚠️  Expected static IP 10.152.183.10, got $cluster_ip${NC}"
+        echo -e "  ${YELLOW}   Static IP may be in use or not applied${NC}"
     fi
+    
+    echo ""
+    echo -e "  ${GREEN}From inside cluster:${NC}"
+    echo -e "    mysql -h $cluster_ip -P 9030 -u root -p"
+    echo ""
+    echo -e "  ${GREEN}From outside cluster:${NC}"
+    echo -e "    ./setup_starrocks.sh port-forward"
+    echo -e "    mysql -h 127.0.0.1 -P 9030 -u root -p"
     echo ""
     echo -e "${YELLOW}Next steps:${NC}"
     echo -e "  1. Initialize database: ${CYAN}./setup_starrocks.sh init${NC}"
@@ -475,20 +496,27 @@ cmd_status() {
     echo ""
     
     # Connection info
-    local svc_info=$(get_service_info)
     echo -e "${CYAN}🔗 Connection:${NC}"
-    if [ "$svc_info" == "ClusterIP" ]; then
-        echo -e "  ${YELLOW}Service type: ClusterIP${NC}"
-        echo -e "  ${GREEN}From inside cluster:${NC}"
-        echo -e "    mysql -h starrocks-fe-service.$NAMESPACE.svc.cluster.local -P 9030 -u root -p"
-        echo -e "  ${GREEN}From outside (use port-forward):${NC}"
-        echo -e "    $KUBECTL port-forward -n $NAMESPACE svc/starrocks-fe-service 9030:9030 8030:8030"
-        echo -e "    mysql -h 127.0.0.1 -P 9030 -u root -p"
-        echo -e "    Web UI: http://127.0.0.1:8030"
-    else
-        echo -e "  MySQL:  ${GREEN}mysql -h $svc_info -P $STARROCKS_PORT -u root -p${NC}"
-        echo -e "  Web UI: ${GREEN}http://$svc_info:30080${NC}"
+    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep fe-service | head -1 | cut -d'/' -f2)
+    local svc_type=$($KUBECTL get svc "$svc_name" -n "$NAMESPACE" -o jsonpath='{.spec.type}' 2>/dev/null)
+    local cluster_ip=$($KUBECTL get svc "$svc_name" -n "$NAMESPACE" -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
+    
+    echo -e "  ${YELLOW}Service: $svc_name (${svc_type})${NC}"
+    echo -e "  ${GREEN}ClusterIP: $cluster_ip${NC}"
+    
+    # Warn if static IP not applied
+    if [ "$cluster_ip" != "10.152.183.10" ] && [ -n "$cluster_ip" ]; then
+        echo -e "  ${YELLOW}⚠️  Expected static IP 10.152.183.10, got $cluster_ip${NC}"
+        echo -e "  ${YELLOW}   (Static IP may be in use or not supported)${NC}"
     fi
+    
+    echo ""
+    echo -e "  ${GREEN}From inside cluster:${NC}"
+    echo -e "    mysql -h $cluster_ip -P 9030 -u root -p"
+    echo ""
+    echo -e "  ${GREEN}From outside (port-forward):${NC}"
+    echo -e "    ./setup_starrocks.sh port-forward"
+    echo -e "    mysql -h 127.0.0.1 -P 9030 -u root -p"
     echo ""
 }
 
@@ -627,20 +655,22 @@ cmd_port_forward() {
     
     check_dependencies
     
-    # Check if StarRocks is running
-    if ! $KUBECTL get svc starrocks-fe-service -n "$NAMESPACE" &>/dev/null; then
-        print_error "StarRocks not found"
+    # Find FE service name
+    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep fe-service | head -1 | cut -d'/' -f2)
+    
+    if [ -z "$svc_name" ]; then
+        print_error "StarRocks FE service not found"
         exit 1
     fi
     
     print_step "Starting port-forward for StarRocks services..."
-    echo -e "${CYAN}MySQL:  localhost:9030 → starrocks-fe-service:9030${NC}"
-    echo -e "${CYAN}Web UI: localhost:8030 → starrocks-fe-service:8030${NC}"
+    echo -e "${CYAN}MySQL:  localhost:9030 → $svc_name:9030${NC}"
+    echo -e "${CYAN}Web UI: localhost:8030 → $svc_name:8030${NC}"
     echo ""
     print_warning "Press Ctrl+C to stop port-forward"
     echo ""
     
-    $KUBECTL port-forward -n "$NAMESPACE" svc/starrocks-fe-service 9030:9030 8030:8030
+    $KUBECTL port-forward -n "$NAMESPACE" svc/$svc_name 9030:9030 8030:8030
 }
 
 # Main

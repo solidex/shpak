@@ -9,7 +9,7 @@ microk8s enable dns storage helm3
 
 **Добавить права на выполнение:**
 ```bash
-chmod +x setup_starrocks.sh
+chmod +x setup_starrocks.sh uninstall_starrocks.sh
 ```
 
 **Одной командой:**
@@ -28,16 +28,26 @@ chmod +x setup_starrocks.sh
 
 ## Команды
 
+**Установка:**
 ```bash
 ./setup_starrocks.sh all 'pass'           # Всё одной командой (secret + install + init)
 ./setup_starrocks.sh create-secret 'pass' # Создать секрет (default: 'password')
 ./setup_starrocks.sh install              # Установить
 ./setup_starrocks.sh init                 # Создать БД RADIUS
+```
+
+**Управление:**
+```bash
 ./setup_starrocks.sh status               # Статус
 ./setup_starrocks.sh port-forward         # Port-forward (для доступа снаружи)
 ./setup_starrocks.sh logs [fe|be]         # Логи
 ./setup_starrocks.sh resize be 150Gi      # Расширить диск
-./setup_starrocks.sh uninstall            # Удалить (сохранить PVC)
+```
+
+**Удаление:**
+```bash
+./uninstall_starrocks.sh                  # Удалить (сохранить PVC)
+./uninstall_starrocks.sh --delete-all     # Удалить всё (включая PVC и namespace)
 ```
 
 ## Подключение
@@ -82,8 +92,10 @@ Retention:  365 дней (12 месяцев)
 | Файл | Назначение |
 |------|------------|
 | `setup_starrocks.sh` | Установка и управление |
+| `uninstall_starrocks.sh` | Удаление StarRocks |
 | `starrocks-values.yaml` | Helm конфигурация |
 | `create_database.sql` | SQL схема RADIUS (12 полей, retention 365 дней) |
+| `troubleshooting.txt` | Диагностика проблем |
 | `README.md` | Документация |
 
 ## Мониторинг
@@ -107,25 +119,30 @@ mysql -h 127.0.0.1 -P 9030 -u root -p -e "SHOW BACKENDS\G"
 
 ## Troubleshooting
 
+**PVC в статусе Pending:**
 ```bash
-# Pod не запускается
-kubectl describe pod starrocks-be-0 -n starrocks
-kubectl logs starrocks-be-0 -n starrocks --tail=100
+# Удалить всё и переустановить
+chmod +x uninstall_starrocks.sh
+./uninstall_starrocks.sh --delete-all
+./setup_starrocks.sh all 'password'
+```
 
-# Изменить retention (если диск заполнился)
+**Проверка подов:**
+```bash
+./setup_starrocks.sh status
+microk8s kubectl describe pod kube-starrocks-fe-0 -n starrocks
+microk8s kubectl logs kube-starrocks-fe-0 -n starrocks
+```
+
+**Изменить retention:**
+```bash
 # Уменьшить с 365 до 180 дней
 mysql -h 127.0.0.1 -P 9030 -u root -p -e "
 ALTER TABLE RADIUS.UTMLogs SET ('dynamic_partition.start' = '-180');
 "
-
-# Увеличить retention до 2 лет
-mysql -h 127.0.0.1 -P 9030 -u root -p -e "
-ALTER TABLE RADIUS.UTMLogs SET ('dynamic_partition.start' = '-730');
-"
-
-# Расширить PVC (если нужно больше места)
-./setup_starrocks.sh resize be 150Gi
 ```
+
+📖 См. `troubleshooting.txt` для деталей
 
 ## PV и отказоустойчивость
 

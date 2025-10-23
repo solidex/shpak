@@ -42,10 +42,9 @@ starrocks:
     # Хранилище метаданных (динамический PVC)
     storageSpec:
       name: fe
-      # StorageClass (пустое значение = default StorageClass)
-      storageClassName: ""
+      # StorageClass для MicroK8s
+      storageClassName: "microk8s-hostpath"
       # Размер хранилища для метаданных
-      # Увеличено с 10Gi до 20Gi для запаса (см. STORAGE_SIZING.md)
       storageSize: 20Gi
       
     # ClusterIP для доступа внутри кластера
@@ -84,13 +83,9 @@ starrocks:
     # Хранилище данных (динамический PVC)
     storageSpec:
       name: be
-      # StorageClass (пустое значение = default StorageClass)
-      storageClassName: ""
-      # Размер хранилища для данных (основное хранилище)
-      # Увеличено с 50Gi до 100Gi:
-      # - Текущие данные: ~26 GB (с репликацией ×3)
-      # - Запас для роста: 3x
-      # - Использование: ~35% (см. STORAGE_SIZING.md)
+      # StorageClass для MicroK8s
+      storageClassName: "microk8s-hostpath"
+      # Размер хранилища для данных
       storageSize: 100Gi
     
     # ClusterIP для доступа внутри кластера

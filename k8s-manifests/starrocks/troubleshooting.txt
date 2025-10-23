@@ -1,0 +1,72 @@
+# StarRocks Troubleshooting - MicroK8s
+
+## Проверка статуса
+
+# 1. Проверить статус подов
+microk8s kubectl get pods -n starrocks
+
+# 2. Описание пода (если не запускается)
+microk8s kubectl describe pod starrocks-fe-0 -n starrocks
+
+# 3. Логи пода
+microk8s kubectl logs starrocks-fe-0 -n starrocks --tail=100
+
+# 4. События в namespace
+microk8s kubectl get events -n starrocks --sort-by='.lastTimestamp' | tail -30
+
+# 5. Проверить PVC
+microk8s kubectl get pvc -n starrocks
+
+# 6. Проверить доступные ресурсы узлов
+microk8s kubectl top nodes
+microk8s kubectl describe nodes
+
+## Типичные проблемы
+
+### 1. Недостаточно ресурсов
+# Проверить:
+microk8s kubectl describe nodes | grep -A 5 "Allocated resources"
+
+# Решение: освободить ресурсы или уменьшить requests в starrocks-values.yaml
+
+### 2. PVC не создаётся
+# Проверить:
+microk8s kubectl get pvc -n starrocks
+microk8s kubectl describe pvc -n starrocks
+
+# Решение: включить storage addon
+microk8s enable storage
+
+### 3. Образ не скачивается
+# Проверить:
+microk8s kubectl describe pod starrocks-fe-0 -n starrocks | grep -A 10 "Events"
+
+# Решение: подождать или проверить интернет
+
+### 4. ClusterIP конфликт
+# Проверить используемые IP:
+microk8s kubectl get svc --all-namespaces -o wide | grep ClusterIP
+
+# Решение: изменить clusterIP в starrocks-values.yaml
+
+## Переустановка
+
+# Удалить всё
+./setup_starrocks.sh uninstall
+microk8s kubectl delete pvc --all -n starrocks
+microk8s kubectl delete namespace starrocks
+
+# Установить заново
+./setup_starrocks.sh all 'password'
+
+## Ручная проверка готовности
+
+# Дождаться запуска FE (может занять 5-10 минут)
+watch microk8s kubectl get pods -n starrocks
+
+# Когда FE готовы (Running), проверить BE
+microk8s kubectl get pods -n starrocks -l app.kubernetes.io/component=be
+
+# Проверить сервисы
+microk8s kubectl get svc -n starrocks
+
