@@ -40,6 +40,7 @@ microk8s status --wait-ready
 ```
 
 **✅ Проверка:**
+
 ```bash
 microk8s kubectl get nodes
 # Должен показать локальный узел в статусе Ready
@@ -54,6 +55,8 @@ microk8s kubectl get nodes
 ```bash
 # Включить community addon репозиторий
 microk8s enable community
+microk8s enable storage
+microk8s enable helm
 
 # Обновить Helm репозитории
 microk8s helm repo update
@@ -127,6 +130,7 @@ microk8s cilium install --version 1.14.5 \
 ```
 
 **⏳ Дождитесь готовности (2-3 минуты):**
+
 ```bash
 microk8s cilium status --wait
 ```
@@ -183,6 +187,7 @@ kubectl label node lenovo-206 egress-gateway=true
 ```
 
 **💡 Примечание:**
+
 - `bgp-policy=a` - узлы, которые будут устанавливать BGP peering
 - `egress-gateway=true` - узлы, которые будут SNAT-ить egress трафик
 
@@ -199,6 +204,7 @@ kubectl get nodes --show-labels | grep -E 'bgp-policy|egress-gateway'
 ### 📁 Структура файлов
 
 Убедитесь, что у вас есть:
+
 ```
 cilium_settings/
 ├── cilium-ippool.yaml               # LoadBalancer IP pool
@@ -221,6 +227,7 @@ kubectl get ciliumpools
 ```
 
 **Ожидаемый вывод:**
+
 ```
 NAME          DISABLED   CONFLICTING   IPS AVAILABLE   AGE
 lb-pool       false      False         254             10s
@@ -238,9 +245,11 @@ kubectl get ciliumbgppeeringpolicies
 ```
 
 **⚠️ Warning о v2alpha1 - это нормально!**
+
 ```
 Warning: cilium.io/v2alpha1 CiliumBGPPeeringPolicy is deprecated
 ```
+
 Игнорируйте - это работает. Миграция на BGPv2 - опционально.
 
 ### 🚪 3. Egress Gateway Policies
@@ -254,6 +263,7 @@ kubectl get ciliumegressgatewaypolicies
 ```
 
 **Ожидаемый вывод:**
+
 ```
 NAME                   AGE
 mhe-fortiapi-egress    10s
@@ -277,6 +287,7 @@ kubectl exec -n kube-system $POD -- cilium bgp peers
 ```
 
 **Ожидается:**
+
 ```
 Local AS   Peer AS   Peer Address      State
 65017      6697      93.85.81.201      Established
@@ -314,6 +325,7 @@ kubectl get nodes -l egress-gateway=true
 **Решение**: Переустановите с правильными флагами (см. раздел 3)
 
 **Проверка конфигурации:**
+
 ```bash
 kubectl get cm cilium-config -n kube-system -o yaml | grep masquerade
 ```
@@ -323,6 +335,7 @@ kubectl get cm cilium-config -n kube-system -o yaml | grep masquerade
 ### ❌ BGP peers не устанавливаются
 
 **Проверка:**
+
 ```bash
 # Логи BGP Control Plane
 kubectl logs -n kube-system ds/cilium | grep -i bgp
@@ -332,6 +345,7 @@ kubectl get nodes -l bgp-policy=a
 ```
 
 **Возможные причины:**
+
 - Узлы не помечены `bgp-policy=a`
 - Неправильные BGP peer адреса в `cilium-bgp-policy.yaml`
 - Firewall блокирует TCP 179 (BGP)
@@ -344,6 +358,7 @@ kubectl get nodes -l bgp-policy=a
 **Проблема**: IP pool использует неправильный формат
 
 **Решение**: Используйте `blocks` вместо `cidrs`:
+
 ```yaml
 spec:
   blocks:
@@ -352,6 +367,7 @@ spec:
 ```
 
 **Проверка поддерживаемых полей:**
+
 ```bash
 kubectl explain ciliumloadbalancerippool.spec --api-version=cilium.io/v2alpha1
 ```
@@ -389,25 +405,23 @@ sudo systemctl restart containerd
 После успешной настройки:
 
 1. **Развернуть сервисы**:
+
    ```bash
    kubectl apply -f deployments/mhe-fortiapi-deployment.yaml
    kubectl apply -f deployments/mhe-ldap-deployment.yaml
    kubectl apply -f deployments/mhe-email-deployment.yaml
    ```
-
 2. **Проверить egress IP**:
+
    ```bash
    kubectl exec -it deployment/mhe-fortiapi -- curl -s ifconfig.me
    # Должно вернуть: 10.3.11.201
    ```
-
 3. **Настроить FortiGate** для приема BGP и маршрутизации egress трафика
 
 ---
 
-**Создано**: 2025-10-21  
-**Версия Cilium**: 1.14.5  
-**Версия MicroK8s**: latest/edge  
+**Создано**: 2025-10-21
+**Версия Cilium**: 1.14.5
+**Версия MicroK8s**: latest/edge
 **Проект**: shpak-k8s
-
-

@@ -79,16 +79,28 @@ echo -e "${GREEN}✅ Helm release uninstalled${NC}"
 
 # Wait for pods to terminate
 echo -e "${CYAN}▶ Waiting for pods to terminate...${NC}"
-sleep 5
+sleep 3
 
 # Delete PVC if requested
 if [ "$DELETE_PVC" = "true" ]; then
     echo -e "${CYAN}▶ Deleting PVC...${NC}"
-    $KUBECTL delete pvc -n "$NAMESPACE" --all --wait=true 2>/dev/null || true
+    
+    # Try graceful delete first (with timeout)
+    $KUBECTL delete pvc -n "$NAMESPACE" --all --timeout=30s 2>/dev/null || {
+        echo -e "${YELLOW}⚠️  Graceful delete timeout, forcing...${NC}"
+        # Force delete by removing finalizers
+        for pvc in $($KUBECTL get pvc -n "$NAMESPACE" -o name 2>/dev/null); do
+            $KUBECTL patch $pvc -n "$NAMESPACE" -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true
+        done
+        $KUBECTL delete pvc -n "$NAMESPACE" --all --grace-period=0 --force 2>/dev/null || true
+    }
     echo -e "${GREEN}✅ PVC deleted${NC}"
     
     echo -e "${CYAN}▶ Deleting namespace...${NC}"
-    $KUBECTL delete namespace "$NAMESPACE" --wait=true 2>/dev/null || true
+    $KUBECTL delete namespace "$NAMESPACE" --timeout=30s 2>/dev/null || {
+        echo -e "${YELLOW}⚠️  Force deleting namespace...${NC}"
+        $KUBECTL delete namespace "$NAMESPACE" --grace-period=0 --force 2>/dev/null || true
+    }
     echo -e "${GREEN}✅ Namespace deleted${NC}"
 else
     echo -e "${YELLOW}⚠️  PVC kept (data preserved)${NC}"
