@@ -1,32 +1,48 @@
 #!/usr/bin/env bash
-# Quick reinstall script
+# =================================================================
+# StarRocks Reinstall Script
+# =================================================================
+# Usage:
+#   ./reinstall.sh [password] [--delete-repo]
+# =================================================================
 
 set -e
 
-# Detect MicroK8s
-if command -v microk8s &> /dev/null; then
-    KUBECTL="microk8s kubectl"
-    HELM="microk8s helm3"
-else
-    KUBECTL="kubectl"
-    HELM="helm"
+PASSWORD=${1:-"password"}
+DELETE_REPO=""
+
+# Check if --delete-repo flag is passed
+for arg in "$@"; do
+    if [ "$arg" = "--delete-repo" ] || [ "$arg" = "-r" ]; then
+        DELETE_REPO="--delete-repo"
+    fi
+done
+
+echo "=================================================================="
+echo "StarRocks Quick Reinstall"
+echo "=================================================================="
+echo ""
+echo "This will perform a full uninstall and then a full install."
+echo "Password: $PASSWORD"
+if [ -n "$DELETE_REPO" ]; then
+    echo "Helm repository will be removed"
+fi
+echo ""
+read -p "Continue? (yes/no): " confirm
+
+if [ "$confirm" != "yes" ]; then
+    echo "Cancelled"
+    exit 0
 fi
 
-echo "Uninstalling StarRocks..."
-$HELM uninstall starrocks -n starrocks 2>/dev/null || true
+echo ""
+echo "--- Uninstalling ---"
+./uninstall_starrocks.sh --delete-all $DELETE_REPO
 
-echo "Deleting PVC..."
-$KUBECTL delete pvc --all -n starrocks --timeout=30s 2>/dev/null || {
-    for pvc in $($KUBECTL get pvc -n starrocks -o name 2>/dev/null); do
-        $KUBECTL patch $pvc -n starrocks -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true
-    done
-}
+echo ""
+echo "--- Installing ---"
+./setup_starrocks.sh all "$PASSWORD"
 
-echo "Deleting namespace..."
-$KUBECTL delete namespace starrocks --timeout=30s 2>/dev/null || true
-
-sleep 5
-
-echo "Reinstalling..."
-./setup_starrocks.sh all 'password'
+echo ""
+echo "Reinstallation complete. Check status: ./setup_starrocks.sh status"
 

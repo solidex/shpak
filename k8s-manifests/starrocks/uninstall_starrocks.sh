@@ -3,8 +3,9 @@
 # StarRocks Uninstall Script for shpak-k8s
 # =================================================================
 # Usage:
-#   ./uninstall_starrocks.sh              - Uninstall (keep PVC)
-#   ./uninstall_starrocks.sh --delete-all - Uninstall + delete PVC
+#   ./uninstall_starrocks.sh                 - Uninstall (keep PVC)
+#   ./uninstall_starrocks.sh --delete-all    - Uninstall + delete PVC + namespace
+#   ./uninstall_starrocks.sh --delete-repo   - Also remove Helm repository
 # =================================================================
 
 # Force bash
@@ -46,9 +47,16 @@ fi
 
 # Determine what to delete
 DELETE_PVC=false
-if [ "$1" = "--delete-all" ] || [ "$1" = "-a" ]; then
-    DELETE_PVC=true
-fi
+DELETE_REPO=false
+
+# Parse arguments
+for arg in "$@"; do
+    if [ "$arg" = "--delete-all" ] || [ "$arg" = "-a" ]; then
+        DELETE_PVC=true
+    elif [ "$arg" = "--delete-repo" ] || [ "$arg" = "-r" ]; then
+        DELETE_REPO=true
+    fi
+done
 
 # Show what will be deleted
 echo -e "${CYAN}Current resources:${NC}"
@@ -63,6 +71,9 @@ if [ "$DELETE_PVC" = "true" ]; then
     echo -e "${RED}    and DELETE all data (PVC will be removed)${NC}"
 else
     echo -e "${YELLOW}    PVC will be kept (data preserved)${NC}"
+fi
+if [ "$DELETE_REPO" = "true" ]; then
+    echo -e "${RED}    and REMOVE Helm repository${NC}"
 fi
 echo ""
 read -p "Are you sure? (yes/no): " confirm
@@ -108,6 +119,19 @@ else
 fi
 
 echo ""
+
+# Remove Helm repository if requested
+if [ "$DELETE_REPO" = "true" ]; then
+    echo -e "${CYAN}▶ Removing Helm repository...${NC}"
+    if $HELM repo list 2>/dev/null | grep -q "^starrocks"; then
+        $HELM repo remove starrocks 2>/dev/null || true
+        echo -e "${GREEN}✅ Helm repository removed${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Helm repository not found${NC}"
+    fi
+    echo ""
+fi
+
 echo -e "${GREEN}✅ StarRocks uninstalled successfully!${NC}"
 echo ""
 

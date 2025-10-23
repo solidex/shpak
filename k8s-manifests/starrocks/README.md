@@ -48,6 +48,8 @@ chmod +x setup_starrocks.sh uninstall_starrocks.sh
 ```bash
 ./uninstall_starrocks.sh                  # Удалить (сохранить PVC)
 ./uninstall_starrocks.sh --delete-all     # Удалить всё (включая PVC и namespace)
+./uninstall_starrocks.sh --delete-repo    # Также удалить Helm репозиторий
+./uninstall_starrocks.sh --delete-all --delete-repo  # Полное удаление
 ```
 
 ## Подключение
