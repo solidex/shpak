@@ -1,9 +1,13 @@
 # =================================================================
-# StarRocks Helm Values - NodePort + Dynamic PVC
+# StarRocks Helm Values - ClusterIP + Dynamic PVC
 # =================================================================
 # Использование:
 #   helm install starrocks starrocks/kube-starrocks \
 #     -n starrocks -f starrocks-values.yaml
+#
+# Доступ снаружи кластера через port-forward:
+#   kubectl port-forward -n starrocks svc/starrocks-fe-service 9030:9030
+#   mysql -h 127.0.0.1 -P 9030 -u root -p
 # =================================================================
 
 # --- Общие настройки ---
@@ -24,7 +28,7 @@ starrocks:
     # Образ StarRocks FE
     image:
       repository: starrocks/fe-ubuntu
-      tag: "3.2-latest"
+      tag: "4.0-latest"
     
     # Ресурсы для FE
     resources:
@@ -41,22 +45,22 @@ starrocks:
       # StorageClass (пустое значение = default StorageClass)
       storageClassName: ""
       # Размер хранилища для метаданных
-      storageSize: 10Gi
+      # Увеличено с 10Gi до 20Gi для запаса (см. STORAGE_SIZING.md)
+      storageSize: 20Gi
       
-    # NodePort для доступа извне
+    # ClusterIP для доступа внутри кластера
     service:
-      type: NodePort
+      type: ClusterIP
+      clusterIP: 10.152.183.10  # Статический IP для FE
       ports:
         # MySQL протокол (query_port)
         - name: query
           port: 9030
           containerPort: 9030
-          nodePort: 30030  # Доступ: mysql -h <node-ip> -P 30030
         # HTTP API и Web UI
         - name: http
           port: 8030
           containerPort: 8030
-          nodePort: 30080  # Web UI: http://<node-ip>:30080
 
   # --- Backend (BE) Configuration ---
   starrockBeSpec:
@@ -66,7 +70,7 @@ starrocks:
     # Образ StarRocks BE
     image:
       repository: starrocks/be-ubuntu
-      tag: "3.2-latest"
+      tag: "4.0-latest"
     
     # Ресурсы для BE
     resources:
@@ -83,22 +87,25 @@ starrocks:
       # StorageClass (пустое значение = default StorageClass)
       storageClassName: ""
       # Размер хранилища для данных (основное хранилище)
-      storageSize: 50Gi
+      # Увеличено с 50Gi до 100Gi:
+      # - Текущие данные: ~26 GB (с репликацией ×3)
+      # - Запас для роста: 3x
+      # - Использование: ~35% (см. STORAGE_SIZING.md)
+      storageSize: 100Gi
     
-    # NodePort для загрузки данных
+    # ClusterIP для доступа внутри кластера
     service:
-      type: NodePort
+      type: ClusterIP
+      clusterIP: 10.152.183.11  # Статический IP для BE
       ports:
         # BE порт для загрузки данных
         - name: be
           port: 9060
           containerPort: 9060
-          nodePort: 30060  # Stream Load: http://<node-ip>:30060
         # BE WebServer
         - name: webserver
           port: 8040
           containerPort: 8040
-          nodePort: 30040  # http://<node-ip>:30040
         # Heartbeat порт (internal)
         - name: heartbeat
           port: 9050

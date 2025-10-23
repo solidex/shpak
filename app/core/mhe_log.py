@@ -5,7 +5,6 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-import mysql.connector
 import requests
 from app.config.env import st
 
@@ -17,11 +16,22 @@ if not logger.handlers:
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
 
-EXTENDED_COLUMNS = [
-    "action", "date", "dstcountry", "dstip", "dstport",
-    "eventtype", "ipaddr", "msg", "srccountry", "srcip",
-    "utmtype", "time", "user", "category", "hostname",
-    "service", "url", "httpagent", "level", "threat"
+# Оптимизированные колонки (12 полей вместо 23)
+# Убрано: date, time (→ event_time), eventtype, ipaddr, httpagent, srccountry, dstcountry
+# Объединено: srcip+srcport → source, dstip+dstport → destination, hostname+url → target
+CORE_COLUMNS = [
+    "event_time",   # DATETIME (объединено date + time)
+    "user",
+    "action",
+    "utmtype",
+    "source",       # srcip:srcport
+    "destination",  # dstip:dstport
+    "service",
+    "target",       # hostname или url
+    "category",
+    "threat",
+    "level",
+    "msg"
 ]
 
 # StarRocks settings
@@ -41,38 +51,81 @@ def parse_syslog_payload(raw_text: str) -> dict | None:
         return None
 
 def _normalize_record(record: dict) -> dict:
-    """Normalize FortiGate syslog fields"""
-    # Merge qname + hostname -> hostname
-    if "qname" in record and record["qname"]:
-        record["hostname"] = record.get("hostname") or record["qname"]
+    """Normalize FortiGate syslog fields to optimized schema"""
+    normalized = {}
     
+    # 1. event_time - объединить date + time
+    date_str = record.get("date", "")
+    time_str = record.get("time", "")
+    if date_str and time_str:
+        normalized["event_time"] = f"{date_str} {time_str}"
+    else:
+        normalized["event_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 2. Основные поля
+    normalized["user"] = record.get("user", "")
+    normalized["action"] = record.get("action", "")
+    
+    # utmtype
+    normalized["utmtype"] = record.get("subtype") or record.get("utmtype", "")
+    
+    # 3. Источник и назначение (IP:port)
+    srcip = record.get("srcip", "")
+    srcport = record.get("srcport", "")
+    if srcip:
+        normalized["source"] = f"{srcip}:{srcport}" if srcport else srcip
+    else:
+        normalized["source"] = ""
+    
+    dstip = record.get("dstip", "")
+    dstport = record.get("dstport", "")
+    if dstip:
+        normalized["destination"] = f"{dstip}:{dstport}" if dstport else dstip
+    else:
+        normalized["destination"] = ""
+    
+    # 4. Web фильтрация
+    # Объединить hostname/qname + url → target (приоритет URL)
+    url = record.get("url", "")
+    hostname = record.get("hostname") or record.get("qname", "")
+    normalized["target"] = hostname if hostname else url
+    
+    # Category
+    normalized["category"] = record.get("catdesc") or record.get("category", "")
+    
+    # 5. Безопасность
     # Merge virus + attack -> threat
     virus = record.get("virus", "")
     attack = record.get("attack", "")
-    if virus or attack:
-        record["threat"] = virus or attack
+    normalized["threat"] = virus or attack or record.get("threat", "")
     
-    # Field renames
-    if "subtype" in record:
-        record["utmtype"] = record.get("subtype")
-    if "catdesc" in record:
-        record["category"] = record.get("catdesc")
-    if "agent" in record:
-        record["httpagent"] = record.get("agent")
-    if "crlevel" in record:
-        record["level"] = record.get("crlevel")
+    # Level
+    normalized["level"] = record.get("crlevel") or record.get("level", "")
     
-    return record
+    # 6. Дополнительная информация
+    normalized["service"] = record.get("service", "")
+    normalized["msg"] = record.get("msg", "")
+    
+    return normalized
 
 def save_to_starrocks(record: dict) -> bool:
-    """Save to StarRocks (analytical storage - unlimited history)"""
+    """Save to StarRocks using Stream Load API"""
     try:
-        # Prepare CSV line for Stream Load
-        values = [str(record.get(col, "")) if record.get(col) is not None else "" 
-                  for col in EXTENDED_COLUMNS]
-        csv_line = ",".join([f'"{v}"' for v in values])
+        # Prepare CSV line
+        values = []
+        for col in CORE_COLUMNS:
+            val = record.get(col)
+            if val is None or val == "":
+                values.append("")
+            elif isinstance(val, (int, float)):
+                values.append(str(val))
+            else:
+                # Escape quotes in strings
+                values.append(str(val).replace('"', '""'))
         
-        # Use Stream Load API (fast bulk insert)
+        csv_line = ",".join([f'"{v}"' if v != "" else "" for v in values])
+        
+        # Stream Load API (порт 9060 для BE, но можно использовать FE)
         url = f"http://{STARROCKS_HOST}:{STARROCKS_PORT}/api/{STARROCKS_DB}/UTMLogs/_stream_load"
         
         headers = {
@@ -94,10 +147,10 @@ def save_to_starrocks(record: dict) -> bool:
             if result.get("Status") == "Success":
                 return True
             else:
-                logger.warning(f"StarRocks load status: {result.get('Status')}")
+                logger.warning(f"StarRocks load failed: {result.get('Status')}, {result.get('Message')}")
                 return False
         else:
-            logger.error(f"StarRocks HTTP error: {response.status_code}")
+            logger.error(f"StarRocks HTTP {response.status_code}: {response.text}")
             return False
             
     except Exception as e:
@@ -105,12 +158,12 @@ def save_to_starrocks(record: dict) -> bool:
         return False
 
 def save_utm_log(record: dict) -> None:
-    """Save UTM log to StarRocks (unlimited retention, fast analytics)"""
-    record = _normalize_record(record)
-    if save_to_starrocks(record):
-        logger.info(f"UTM log saved: user={record.get('user')}, action={record.get('action')}")
+    """Save UTM log to StarRocks (optimized schema)"""
+    normalized = _normalize_record(record)
+    if save_to_starrocks(normalized):
+        logger.info(f"UTM log saved: user={normalized.get('user')}, action={normalized.get('action')}")
     else:
-        logger.error(f"Failed to save UTM log: user={record.get('user')}")
+        logger.error(f"Failed to save UTM log: user={normalized.get('user')}")
 
 class SyslogUDP(asyncio.DatagramProtocol):
     def datagram_received(self, data: bytes, addr):
@@ -127,7 +180,6 @@ class SyslogUDP(asyncio.DatagramProtocol):
             return
 
         try:
-            # Save to StarRocks only
             save_utm_log(record)
         except Exception as e:
             logger.error(f"Failed to process UTM log: {e}")
@@ -135,7 +187,7 @@ class SyslogUDP(asyncio.DatagramProtocol):
 async def run_udp_server(host: str = "0.0.0.0", port: int = 514):
     loop = asyncio.get_running_loop()
     transport, _ = await loop.create_datagram_endpoint(SyslogUDP, local_addr=(host, port))
-    logger.info(f"Syslog UDP server (StarRocks) listening on {host}:{port}")
+    logger.info(f"Syslog UDP server (StarRocks optimized) listening on {host}:{port}")
     return transport
 
 def main():
@@ -147,3 +199,4 @@ def main():
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
     main()
+
