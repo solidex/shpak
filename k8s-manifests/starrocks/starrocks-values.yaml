@@ -123,7 +123,7 @@ operator:
   # Образ StarRocks оператора
   image:
     repository: starrocks/operator
-    tag: "v1.11.3"
+    tag: "latest"
   
   # Ресурсы для оператора
   resources:
