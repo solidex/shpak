@@ -276,6 +276,19 @@ cmd_install() {
     
     check_dependencies
     
+    # Check StorageClass
+    print_step "Checking StorageClass..."
+    if ! $KUBECTL get storageclass microk8s-hostpath &>/dev/null; then
+        print_warning "StorageClass 'microk8s-hostpath' not found"
+        echo ""
+        echo -e "${YELLOW}Available StorageClasses:${NC}"
+        $KUBECTL get storageclass
+        echo ""
+        print_error "Enable storage addon: microk8s enable storage"
+        exit 1
+    fi
+    print_success "StorageClass 'microk8s-hostpath' found"
+    
     # Check if already installed
     if $HELM list -n "$NAMESPACE" 2>/dev/null | grep -q "$RELEASE_NAME"; then
         print_warning "StarRocks already installed"

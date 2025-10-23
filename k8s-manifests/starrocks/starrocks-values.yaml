@@ -41,11 +41,12 @@ starrocks:
     
     # Хранилище метаданных (динамический PVC)
     storageSpec:
-      name: fe
       # StorageClass для MicroK8s
       storageClassName: "microk8s-hostpath"
       # Размер хранилища для метаданных
       storageSize: 20Gi
+      # Volumes для FE
+      logStorageSize: 1Gi
       
     # ClusterIP для доступа внутри кластера
     service:
@@ -82,11 +83,12 @@ starrocks:
     
     # Хранилище данных (динамический PVC)
     storageSpec:
-      name: be
       # StorageClass для MicroK8s
       storageClassName: "microk8s-hostpath"
       # Размер хранилища для данных
       storageSize: 100Gi
+      # Volumes для BE
+      logStorageSize: 1Gi
     
     # ClusterIP для доступа внутри кластера
     service:
