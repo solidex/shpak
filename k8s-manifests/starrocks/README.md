@@ -52,10 +52,14 @@ chmod +x setup_starrocks.sh uninstall_starrocks.sh
 
 ## Подключение
 
-**Изнутри кластера (статические IP):**
+**Изнутри кластера:**
 ```python
-host = '10.152.183.10'
+# Используйте фактический ClusterIP (узнать: ./setup_starrocks.sh status)
+host = '10.152.183.118'  # Или DNS имя
 port = 9030
+
+# Или через DNS (рекомендуется):
+host = 'kube-starrocks-fe-service.starrocks.svc.cluster.local'
 ```
 
 **Снаружи (port-forward):**
@@ -93,6 +97,7 @@ Retention:  365 дней (12 месяцев)
 |------|------------|
 | `setup_starrocks.sh` | Установка и управление |
 | `uninstall_starrocks.sh` | Удаление StarRocks |
+| `reinstall.sh` | Быстрая переустановка |
 | `starrocks-values.yaml` | Helm конфигурация |
 | `create_database.sql` | SQL схема RADIUS (12 полей, retention 365 дней) |
 | `troubleshooting.txt` | Диагностика проблем |

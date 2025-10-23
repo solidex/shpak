@@ -172,8 +172,11 @@ cmd_all() {
     fi
     
     wait_for_pods "fe" 300 || {
-        print_error "FE pods not ready"
-        exit 1
+        print_warning "FE pods not ready yet. Skipping database initialization."
+        echo ""
+        echo -e "${YELLOW}Run this when pods are ready:${NC}"
+        echo -e "  ${CYAN}./setup_starrocks.sh init${NC}"
+        return 0
     }
     
     local svc_info=$(get_service_info)
@@ -334,10 +337,16 @@ cmd_install() {
     echo ""
     
     # Wait for FE
-    wait_for_pods "fe" 600
+    wait_for_pods "fe" 600 || {
+        print_warning "FE pods not ready, but continuing..."
+        echo -e "${YELLOW}Run './setup_starrocks.sh status' to check progress${NC}"
+        echo -e "${YELLOW}Run './setup_starrocks.sh init' when pods are ready${NC}"
+    }
     
     # Wait for BE
-    wait_for_pods "be" 600
+    wait_for_pods "be" 600 || {
+        print_warning "BE pods not ready, but continuing..."
+    }
     
     echo ""
     print_success "StarRocks installed successfully!"

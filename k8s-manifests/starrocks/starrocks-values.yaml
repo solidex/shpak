@@ -51,7 +51,7 @@ starrocks:
     # ClusterIP для доступа внутри кластера
     service:
       type: ClusterIP
-      clusterIP: 10.152.183.10  # Статический IP для FE
+      # clusterIP: 10.152.183.10  # Статический IP (закомментировано - может конфликтовать)
       ports:
         # MySQL протокол (query_port)
         - name: query
@@ -93,7 +93,7 @@ starrocks:
     # ClusterIP для доступа внутри кластера
     service:
       type: ClusterIP
-      clusterIP: 10.152.183.11  # Статический IP для BE
+      # clusterIP: 10.152.183.11  # Статический IP (закомментировано - может конфликтовать)
       ports:
         # BE порт для загрузки данных
         - name: be
