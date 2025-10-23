@@ -29,6 +29,7 @@ starrocks:
     image:
       repository: starrocks/fe-ubuntu
       tag: "4.0-latest"
+      #tag: "3.3-latest"  # Stable version, tested with operator v1.11.3
     
     # Ресурсы для FE
     resources:
@@ -73,6 +74,7 @@ starrocks:
     image:
       repository: starrocks/be-ubuntu
       tag: "4.0-latest"
+      #tag: "3.3-latest"  # Must match FE version
     
     # Ресурсы для BE
     resources:
