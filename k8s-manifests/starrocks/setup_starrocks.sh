@@ -27,6 +27,15 @@ VALUES_FILE="starrocks-values.yaml"
 STARROCKS_PORT="30030"
 STARROCKS_USER="root"
 
+# Detect MicroK8s
+if command -v microk8s &> /dev/null; then
+    KUBECTL="microk8s kubectl"
+    HELM="microk8s helm3"
+else
+    KUBECTL="kubectl"
+    HELM="helm"
+fi
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -60,35 +69,32 @@ print_error() {
 }
 
 check_dependencies() {
-    local missing=0
-    
-    if ! command -v kubectl &> /dev/null; then
-        print_error "kubectl not found"
-        missing=1
+    # Check kubectl
+    if ! $KUBECTL version &> /dev/null; then
+        print_error "$KUBECTL not available (tried: $KUBECTL)"
+        return 1
     fi
     
-    if ! command -v helm &> /dev/null; then
-        print_error "helm not found"
-        missing=1
+    # Check helm
+    if ! $HELM version &> /dev/null; then
+        print_error "$HELM not available (tried: $HELM)"
+        return 1
     fi
     
-    if [ $missing -eq 1 ]; then
-        print_error "Please install missing dependencies"
-        exit 1
-    fi
+    return 0
 }
 
 get_service_info() {
     local svc_name="starrocks-fe-service"
-    local svc_type=$(kubectl get svc "$svc_name" -n "$NAMESPACE" -o jsonpath='{.spec.type}' 2>/dev/null)
+    local svc_type=$($KUBECTL get svc "$svc_name" -n "$NAMESPACE" -o jsonpath='{.spec.type}' 2>/dev/null)
     
     if [ "$svc_type" == "ClusterIP" ]; then
         echo "ClusterIP"
     else
         # NodePort or LoadBalancer
-        local node_ip=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+        local node_ip=$($KUBECTL get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
         if [ -z "$node_ip" ]; then
-            node_ip=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}' 2>/dev/null)
+            node_ip=$($KUBECTL get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}' 2>/dev/null)
         fi
         echo "$node_ip"
     fi
@@ -96,7 +102,7 @@ get_service_info() {
 
 start_port_forward() {
     print_step "Starting port-forward for MySQL connection..."
-    kubectl port-forward -n "$NAMESPACE" svc/starrocks-fe-service 9030:9030 &>/dev/null &
+    $KUBECTL port-forward -n "$NAMESPACE" svc/starrocks-fe-service 9030:9030 &>/dev/null &
     local pf_pid=$!
     sleep 2
     echo "$pf_pid"
@@ -108,7 +114,7 @@ wait_for_pods() {
     
     print_step "Waiting for $component pods to be ready (timeout: ${timeout}s)..."
     
-    if kubectl wait --for=condition=ready pod \
+    if $KUBECTL wait --for=condition=ready pod \
         -l app.kubernetes.io/component=$component \
         -n "$NAMESPACE" \
         --timeout=${timeout}s &> /dev/null; then
@@ -225,22 +231,22 @@ cmd_create_secret() {
     
     # Create namespace
     print_step "Creating namespace: $NAMESPACE"
-    kubectl create namespace "$NAMESPACE" 2>/dev/null || print_warning "Namespace already exists"
+    $KUBECTL create namespace "$NAMESPACE" 2>/dev/null || print_warning "Namespace already exists"
     
     # Check if secret already exists
-    if kubectl get secret starrocks-root-pass -n "$NAMESPACE" &>/dev/null; then
+    if $KUBECTL get secret starrocks-root-pass -n "$NAMESPACE" &>/dev/null; then
         print_warning "Secret 'starrocks-root-pass' already exists"
         read -p "Overwrite? (yes/no): " confirm
         if [ "$confirm" != "yes" ]; then
             print_warning "Cancelled"
             exit 0
         fi
-        kubectl delete secret starrocks-root-pass -n "$NAMESPACE"
+        $KUBECTL delete secret starrocks-root-pass -n "$NAMESPACE"
     fi
     
     # Create secret
     print_step "Creating secret with password: $password"
-    kubectl create secret generic starrocks-root-pass \
+    $KUBECTL create secret generic starrocks-root-pass \
         --from-literal=password="$password" \
         -n "$NAMESPACE"
     
@@ -257,9 +263,9 @@ cmd_install() {
     check_dependencies
     
     # Check if already installed
-    if helm list -n "$NAMESPACE" 2>/dev/null | grep -q "$RELEASE_NAME"; then
+    if $HELM list -n "$NAMESPACE" 2>/dev/null | grep -q "$RELEASE_NAME"; then
         print_warning "StarRocks already installed"
-        echo -e "Use: ${CYAN}helm upgrade $RELEASE_NAME $CHART -n $NAMESPACE -f $VALUES_FILE${NC}"
+        echo -e "Use: ${CYAN}$HELM upgrade $RELEASE_NAME $CHART -n $NAMESPACE -f $VALUES_FILE${NC}"
         exit 0
     fi
     
@@ -271,14 +277,14 @@ cmd_install() {
     
     # Create namespace
     print_step "Creating namespace: $NAMESPACE"
-    kubectl create namespace "$NAMESPACE" 2>/dev/null || print_warning "Namespace already exists"
+    $KUBECTL create namespace "$NAMESPACE" 2>/dev/null || print_warning "Namespace already exists"
     
     # Check if secret exists
-    if ! kubectl get secret starrocks-root-pass -n "$NAMESPACE" &>/dev/null; then
+    if ! $KUBECTL get secret starrocks-root-pass -n "$NAMESPACE" &>/dev/null; then
         print_warning "Secret 'starrocks-root-pass' not found"
         echo ""
         echo -e "${YELLOW}Creating secret with default password...${NC}"
-        kubectl create secret generic starrocks-root-pass \
+        $KUBECTL create secret generic starrocks-root-pass \
             --from-literal=password='password' \
             -n "$NAMESPACE"
         print_success "Secret created (password: 'password')"
@@ -288,12 +294,12 @@ cmd_install() {
     
     # Add Helm repo
     print_step "Adding StarRocks Helm repository"
-    helm repo add starrocks https://starrocks.github.io/starrocks-kubernetes-operator 2>/dev/null || true
-    helm repo update starrocks
+    $HELM repo add starrocks https://starrocks.github.io/starrocks-kubernetes-operator 2>/dev/null || true
+    $HELM repo update starrocks
     
     # Install
     print_step "Installing StarRocks (this may take 5-10 minutes)..."
-    helm install "$RELEASE_NAME" "$CHART" \
+    $HELM install "$RELEASE_NAME" "$CHART" \
         -n "$NAMESPACE" \
         -f "$VALUES_FILE"
     
@@ -318,7 +324,7 @@ cmd_install() {
         echo -e "  ${GREEN}From inside cluster:${NC}"
         echo -e "    mysql -h starrocks-fe-service.$NAMESPACE.svc.cluster.local -P 9030 -u root -p"
         echo -e "  ${GREEN}From outside cluster:${NC}"
-        echo -e "    kubectl port-forward -n $NAMESPACE svc/starrocks-fe-service 9030:9030"
+        echo -e "    $KUBECTL port-forward -n $NAMESPACE svc/starrocks-fe-service 9030:9030"
         echo -e "    mysql -h 127.0.0.1 -P 9030 -u root -p"
     else
         echo -e "  MySQL:  ${GREEN}mysql -h $svc_info -P $STARROCKS_PORT -u root -p${NC}"
@@ -345,7 +351,7 @@ cmd_init() {
     fi
     
     # Check if StarRocks is running
-    if ! kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/component=fe &>/dev/null; then
+    if ! $KUBECTL get pods -n "$NAMESPACE" -l app.kubernetes.io/component=fe &>/dev/null; then
         print_error "StarRocks not found. Install first: ./setup_starrocks.sh install"
         exit 1
     fi
@@ -433,35 +439,35 @@ cmd_status() {
     check_dependencies
     
     # Check if StarRocks is installed
-    if ! helm list -n "$NAMESPACE" 2>/dev/null | grep -q "$RELEASE_NAME"; then
+    if ! $HELM list -n "$NAMESPACE" 2>/dev/null | grep -q "$RELEASE_NAME"; then
         print_error "StarRocks not installed"
         exit 1
     fi
     
     echo -e "${CYAN}📦 Helm Release:${NC}"
-    helm list -n "$NAMESPACE" | grep "$RELEASE_NAME" || true
+    $HELM list -n "$NAMESPACE" | grep "$RELEASE_NAME" || true
     echo ""
     
     echo -e "${CYAN}🔧 Pods:${NC}"
-    kubectl get pods -n "$NAMESPACE" -o wide
+    $KUBECTL get pods -n "$NAMESPACE" -o wide
     echo ""
     
     echo -e "${CYAN}💾 PVC (Persistent Volume Claims):${NC}"
-    kubectl get pvc -n "$NAMESPACE"
+    $KUBECTL get pvc -n "$NAMESPACE"
     echo ""
     
     echo -e "${CYAN}🌐 Services:${NC}"
-    kubectl get svc -n "$NAMESPACE"
+    $KUBECTL get svc -n "$NAMESPACE"
     echo ""
     
     # Check disk usage
     echo -e "${CYAN}💽 Disk Usage (BE):${NC}"
-    local be_pods=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/component=be -o name 2>/dev/null)
+    local be_pods=$($KUBECTL get pods -n "$NAMESPACE" -l app.kubernetes.io/component=be -o name 2>/dev/null)
     if [ -n "$be_pods" ]; then
         for pod in $be_pods; do
             local pod_name=$(basename $pod)
             echo -e "${BLUE}  $pod_name:${NC}"
-            kubectl exec -n "$NAMESPACE" "$pod_name" -- df -h /opt/starrocks/be/storage 2>/dev/null | tail -n 1 || echo "    (not available)"
+            $KUBECTL exec -n "$NAMESPACE" "$pod_name" -- df -h /opt/starrocks/be/storage 2>/dev/null | tail -n 1 || echo "    (not available)"
         done
     else
         print_warning "No BE pods found"
@@ -476,7 +482,7 @@ cmd_status() {
         echo -e "  ${GREEN}From inside cluster:${NC}"
         echo -e "    mysql -h starrocks-fe-service.$NAMESPACE.svc.cluster.local -P 9030 -u root -p"
         echo -e "  ${GREEN}From outside (use port-forward):${NC}"
-        echo -e "    kubectl port-forward -n $NAMESPACE svc/starrocks-fe-service 9030:9030 8030:8030"
+        echo -e "    $KUBECTL port-forward -n $NAMESPACE svc/starrocks-fe-service 9030:9030 8030:8030"
         echo -e "    mysql -h 127.0.0.1 -P 9030 -u root -p"
         echo -e "    Web UI: http://127.0.0.1:8030"
     else
@@ -495,7 +501,7 @@ cmd_logs() {
     
     check_dependencies
     
-    local pods=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/component="$component" -o name 2>/dev/null)
+    local pods=$($KUBECTL get pods -n "$NAMESPACE" -l app.kubernetes.io/component="$component" -o name 2>/dev/null)
     
     if [ -z "$pods" ]; then
         print_error "No $component pods found"
@@ -505,7 +511,7 @@ cmd_logs() {
     for pod in $pods; do
         local pod_name=$(basename $pod)
         echo -e "${CYAN}=== $pod_name ===${NC}"
-        kubectl logs -n "$NAMESPACE" "$pod_name" --tail="$lines"
+        $KUBECTL logs -n "$NAMESPACE" "$pod_name" --tail="$lines"
         echo ""
     done
 }
@@ -523,7 +529,7 @@ cmd_uninstall() {
     check_dependencies
     
     # Check if installed
-    if ! helm list -n "$NAMESPACE" 2>/dev/null | grep -q "$RELEASE_NAME"; then
+    if ! $HELM list -n "$NAMESPACE" 2>/dev/null | grep -q "$RELEASE_NAME"; then
         print_warning "StarRocks not installed"
         exit 0
     fi
@@ -545,17 +551,17 @@ cmd_uninstall() {
     
     # Uninstall
     print_step "Uninstalling Helm release..."
-    helm uninstall "$RELEASE_NAME" -n "$NAMESPACE"
+    $HELM uninstall "$RELEASE_NAME" -n "$NAMESPACE"
     
     print_success "Helm release uninstalled"
     
     # Delete PVC if requested
     if [ "$keep_pvc" == "false" ]; then
         print_step "Deleting PVC..."
-        kubectl delete pvc -n "$NAMESPACE" --all
+        $KUBECTL delete pvc -n "$NAMESPACE" --all
         print_success "PVC deleted"
     else
-        print_warning "PVC kept (to delete manually: kubectl delete pvc -n $NAMESPACE --all)"
+        print_warning "PVC kept (to delete manually: $KUBECTL delete pvc -n $NAMESPACE --all)"
     fi
     
     echo ""
@@ -580,8 +586,8 @@ cmd_resize() {
     # Check if StorageClass supports expansion
     print_step "Checking StorageClass capabilities..."
     
-    local sc=$(kubectl get pvc -n "$NAMESPACE" -o jsonpath='{.items[0].spec.storageClassName}' 2>/dev/null)
-    local allow_expansion=$(kubectl get storageclass "$sc" -o jsonpath='{.allowVolumeExpansion}' 2>/dev/null)
+    local sc=$($KUBECTL get pvc -n "$NAMESPACE" -o jsonpath='{.items[0].spec.storageClassName}' 2>/dev/null)
+    local allow_expansion=$($KUBECTL get storageclass "$sc" -o jsonpath='{.allowVolumeExpansion}' 2>/dev/null)
     
     if [ "$allow_expansion" != "true" ]; then
         print_error "StorageClass '$sc' does not support volume expansion"
@@ -592,7 +598,7 @@ cmd_resize() {
     print_success "StorageClass supports expansion"
     
     # Get PVC names
-    local pvcs=$(kubectl get pvc -n "$NAMESPACE" -o name | grep "$component" 2>/dev/null)
+    local pvcs=$($KUBECTL get pvc -n "$NAMESPACE" -o name | grep "$component" 2>/dev/null)
     
     if [ -z "$pvcs" ]; then
         print_error "No PVC found for component: $component"
@@ -604,7 +610,7 @@ cmd_resize() {
         local pvc_name=$(basename $pvc)
         print_step "Resizing $pvc_name to $new_size..."
         
-        kubectl patch pvc "$pvc_name" -n "$NAMESPACE" \
+        $KUBECTL patch pvc "$pvc_name" -n "$NAMESPACE" \
             -p "{\"spec\":{\"resources\":{\"requests\":{\"storage\":\"$new_size\"}}}}"
         
         print_success "$pvc_name patched"
@@ -612,7 +618,7 @@ cmd_resize() {
     
     echo ""
     print_warning "Note: Pod restart may be required for changes to take effect"
-    echo -e "Run: ${CYAN}kubectl delete pod -n $NAMESPACE -l app.kubernetes.io/component=$component${NC}"
+    echo -e "Run: ${CYAN}$KUBECTL delete pod -n $NAMESPACE -l app.kubernetes.io/component=$component${NC}"
 }
 
 # Command: port-forward
@@ -622,7 +628,7 @@ cmd_port_forward() {
     check_dependencies
     
     # Check if StarRocks is running
-    if ! kubectl get svc starrocks-fe-service -n "$NAMESPACE" &>/dev/null; then
+    if ! $KUBECTL get svc starrocks-fe-service -n "$NAMESPACE" &>/dev/null; then
         print_error "StarRocks not found"
         exit 1
     fi
@@ -634,7 +640,7 @@ cmd_port_forward() {
     print_warning "Press Ctrl+C to stop port-forward"
     echo ""
     
-    kubectl port-forward -n "$NAMESPACE" svc/starrocks-fe-service 9030:9030 8030:8030
+    $KUBECTL port-forward -n "$NAMESPACE" svc/starrocks-fe-service 9030:9030 8030:8030
 }
 
 # Main

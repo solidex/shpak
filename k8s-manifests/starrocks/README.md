@@ -2,10 +2,22 @@
 
 ## Быстрый старт
 
+**MicroK8s (включить нужные аддоны):**
+```bash
+microk8s enable dns storage helm3
+```
+
+**Добавить права на выполнение:**
+```bash
+chmod +x setup_starrocks.sh
+```
+
 **Одной командой:**
 ```bash
 ./setup_starrocks.sh all 'YourPassword123!'
 ```
+
+> **Примечание:** Скрипт автоматически определяет MicroK8s и использует `microk8s kubectl` / `microk8s helm3`
 
 **Или пошагово:**
 ```bash

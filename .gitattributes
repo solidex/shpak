@@ -1,0 +1,7 @@
+# Shell scripts should be executable
+*.sh text eol=lf
+
+# Set executable bit for specific scripts
+k8s-manifests/starrocks/setup_starrocks.sh text eol=lf
+docker/test_build.sh text eol=lf
+
