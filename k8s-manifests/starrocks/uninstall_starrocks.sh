@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =================================================================
 # StarRocks Uninstall Script for shpak-k8s
 # =================================================================
@@ -6,6 +6,11 @@
 #   ./uninstall_starrocks.sh              - Uninstall (keep PVC)
 #   ./uninstall_starrocks.sh --delete-all - Uninstall + delete PVC
 # =================================================================
+
+# Force bash
+if [ -z "$BASH_VERSION" ]; then
+    exec bash "$0" "$@"
+fi
 
 set -e
 
@@ -41,7 +46,7 @@ fi
 
 # Determine what to delete
 DELETE_PVC=false
-if [ "$1" == "--delete-all" ] || [ "$1" == "-a" ]; then
+if [ "$1" = "--delete-all" ] || [ "$1" = "-a" ]; then
     DELETE_PVC=true
 fi
 
@@ -54,7 +59,7 @@ echo ""
 
 # Confirmation
 echo -e "${RED}⚠️  WARNING: This will remove StarRocks${NC}"
-if [ "$DELETE_PVC" == "true" ]; then
+if [ "$DELETE_PVC" = "true" ]; then
     echo -e "${RED}    and DELETE all data (PVC will be removed)${NC}"
 else
     echo -e "${YELLOW}    PVC will be kept (data preserved)${NC}"
@@ -77,7 +82,7 @@ echo -e "${CYAN}▶ Waiting for pods to terminate...${NC}"
 sleep 5
 
 # Delete PVC if requested
-if [ "$DELETE_PVC" == "true" ]; then
+if [ "$DELETE_PVC" = "true" ]; then
     echo -e "${CYAN}▶ Deleting PVC...${NC}"
     $KUBECTL delete pvc -n "$NAMESPACE" --all --wait=true 2>/dev/null || true
     echo -e "${GREEN}✅ PVC deleted${NC}"
@@ -94,7 +99,7 @@ echo ""
 echo -e "${GREEN}✅ StarRocks uninstalled successfully!${NC}"
 echo ""
 
-if [ "$DELETE_PVC" == "false" ]; then
+if [ "$DELETE_PVC" = "false" ]; then
     echo -e "${CYAN}To reinstall with existing data:${NC}"
     echo -e "  ${GREEN}./setup_starrocks.sh install${NC}"
     echo ""
