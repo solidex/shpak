@@ -39,14 +39,16 @@ starrocks:
         cpu: 2         # 2 CPU
         memory: 4Gi    # 4 GB RAM
     
-    # Хранилище метаданных (динамический PVC)
-    storageSpec:
-      # StorageClass для MicroK8s
-      storageClassName: "microk8s-hostpath"
-      # Размер хранилища для метаданных
-      storageSize: 20Gi
-      # Volumes для FE
-      logStorageSize: 1Gi
+    # Хранилище (динамические PVC через storageVolumes)
+    storageVolumes:
+      - name: fe-meta
+        storageClassName: "microk8s-hostpath"
+        storageSize: 20Gi
+        mountPath: /opt/starrocks/fe/meta
+      - name: fe-log
+        storageClassName: "microk8s-hostpath"
+        storageSize: 1Gi
+        mountPath: /opt/starrocks/fe/log
       
     # ClusterIP для доступа внутри кластера
     service:
@@ -63,7 +65,7 @@ starrocks:
           containerPort: 8030
 
   # --- Backend (BE) Configuration ---
-  starrockBeSpec:
+  starrocksBeSpec:
     # Высокая доступность - 3 реплики
     replicas: 3
     
@@ -81,14 +83,16 @@ starrocks:
         cpu: 4         # 4 CPU
         memory: 8Gi    # 8 GB RAM
     
-    # Хранилище данных (динамический PVC)
-    storageSpec:
-      # StorageClass для MicroK8s
-      storageClassName: "microk8s-hostpath"
-      # Размер хранилища для данных
-      storageSize: 100Gi
-      # Volumes для BE
-      logStorageSize: 1Gi
+    # Хранилище (динамические PVC через storageVolumes)
+    storageVolumes:
+      - name: be-data
+        storageClassName: "microk8s-hostpath"
+        storageSize: 100Gi
+        mountPath: /opt/starrocks/be/storage
+      - name: be-log
+        storageClassName: "microk8s-hostpath"
+        storageSize: 1Gi
+        mountPath: /opt/starrocks/be/log
     
     # ClusterIP для доступа внутри кластера
     service:
@@ -117,7 +121,7 @@ operator:
   # Образ StarRocks оператора
   image:
     repository: starrocks/operator
-    tag: "v1.9.7"
+    tag: "v1.11.3"
   
   # Ресурсы для оператора
   resources:

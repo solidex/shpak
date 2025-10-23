@@ -46,10 +46,10 @@ NC='\033[0m' # No Color
 
 # Functions
 print_header() {
-    echo -e "${CYAN}==================================================================${NC}"
+echo -e "${CYAN}==================================================================${NC}"
     echo -e "${CYAN}$1${NC}"
-    echo -e "${CYAN}==================================================================${NC}"
-    echo ""
+echo -e "${CYAN}==================================================================${NC}"
+echo ""
 }
 
 print_step() {
@@ -198,9 +198,9 @@ cmd_all() {
     if [ ! -f "create_database.sql" ]; then
         print_error "SQL file not found: create_database.sql"
         [ -n "$pf_pid" ] && kill "$pf_pid" 2>/dev/null
-        exit 1
-    fi
-    
+    exit 1
+fi
+
     print_step "Creating RADIUS database and tables..."
     if mysql -h "$mysql_host" -P "$mysql_port" -u "$STARROCKS_USER" -p"$password" < create_database.sql 2>/dev/null; then
         print_success "Database initialized successfully!"
@@ -302,9 +302,9 @@ cmd_install() {
     # Check if values file exists
     if [ ! -f "$VALUES_FILE" ]; then
         print_error "Values file not found: $VALUES_FILE"
-        exit 1
-    fi
-    
+    exit 1
+fi
+
     # Create namespace
     print_step "Creating namespace: $NAMESPACE"
     $KUBECTL create namespace "$NAMESPACE" 2>/dev/null || print_warning "Namespace already exists"
@@ -330,7 +330,7 @@ cmd_install() {
     # Install
     print_step "Installing StarRocks (this may take 5-10 minutes)..."
     $HELM install "$RELEASE_NAME" "$CHART" \
-        -n "$NAMESPACE" \
+    -n "$NAMESPACE" \
         -f "$VALUES_FILE"
     
     print_success "StarRocks installation started"
@@ -360,8 +360,8 @@ cmd_install() {
         echo -e "${YELLOW}Wait 5-10 minutes, then run: ./setup_starrocks.sh init${NC}"
     fi
     
-    echo ""
-    
+echo ""
+
     # Show connection info
     local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep fe-service | head -1 | cut -d'/' -f2)
     local cluster_ip=$($KUBECTL get svc "$svc_name" -n "$NAMESPACE" -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
@@ -432,19 +432,19 @@ cmd_init() {
         mysql_port="$STARROCKS_PORT"
         print_success "Using external connection: $mysql_host:$mysql_port"
     fi
-    echo ""
+echo ""
     
     # Check if SQL file exists
     if [ ! -f "create_database.sql" ]; then
         print_error "SQL file not found: create_database.sql"
         exit 1
     fi
-    
-    # Prompt for password
-    echo -e "${YELLOW}Enter StarRocks root password:${NC}"
-    read -s STARROCKS_PASSWORD
-    echo ""
-    
+
+# Prompt for password
+echo -e "${YELLOW}Enter StarRocks root password:${NC}"
+read -s STARROCKS_PASSWORD
+echo ""
+
     # Create database
     print_step "Creating RADIUS database and tables..."
     if mysql -h "$mysql_host" -P "$mysql_port" -u "$STARROCKS_USER" -p"$STARROCKS_PASSWORD" < create_database.sql 2>/dev/null; then
@@ -452,27 +452,27 @@ cmd_init() {
     else
         print_error "Failed to initialize database"
         [ -n "$pf_pid" ] && kill "$pf_pid" 2>/dev/null
-        exit 1
-    fi
-    
+    exit 1
+fi
+
     # Verify
     print_step "Verifying tables..."
     local tables=$(mysql -h "$mysql_host" -P "$mysql_port" -u "$STARROCKS_USER" -p"$STARROCKS_PASSWORD" \
-        -e "USE RADIUS; SHOW TABLES;" 2>/dev/null | grep -v Tables_in | wc -l)
-    
+    -e "USE RADIUS; SHOW TABLES;" 2>/dev/null | grep -v Tables_in | wc -l)
+
     print_success "Created $tables tables in RADIUS database"
     echo ""
-    
-    # Show table details
+
+# Show table details
     echo -e "${CYAN}Table details:${NC}"
     mysql -h "$mysql_host" -P "$mysql_port" -u "$STARROCKS_USER" -p"$STARROCKS_PASSWORD" \
-        -e "USE RADIUS; 
-            SELECT 
-                TABLE_NAME, 
-                TABLE_ROWS as 'Rows',
-                ROUND(DATA_LENGTH / 1024 / 1024, 2) as 'Size_MB'
-            FROM information_schema.TABLES 
-            WHERE TABLE_SCHEMA = 'RADIUS' 
+    -e "USE RADIUS; 
+        SELECT 
+            TABLE_NAME, 
+            TABLE_ROWS as 'Rows',
+            ROUND(DATA_LENGTH / 1024 / 1024, 2) as 'Size_MB'
+        FROM information_schema.TABLES 
+        WHERE TABLE_SCHEMA = 'RADIUS' 
             ORDER BY TABLE_NAME;" 2>/dev/null
     
     # Cleanup port-forward
@@ -541,15 +541,15 @@ cmd_status() {
         echo -e "  ${YELLOW}⚠️  Expected static IP 10.152.183.10, got $cluster_ip${NC}"
         echo -e "  ${YELLOW}   (Static IP may be in use or not supported)${NC}"
     fi
-    
-    echo ""
+
+echo ""
     echo -e "  ${GREEN}From inside cluster:${NC}"
     echo -e "    mysql -h $cluster_ip -P 9030 -u root -p"
     echo ""
     echo -e "  ${GREEN}From outside (port-forward):${NC}"
     echo -e "    ./setup_starrocks.sh port-forward"
     echo -e "    mysql -h 127.0.0.1 -P 9030 -u root -p"
-    echo ""
+echo ""
 }
 
 # Command: logs
@@ -572,7 +572,7 @@ cmd_logs() {
         local pod_name=$(basename $pod)
         echo -e "${CYAN}=== $pod_name ===${NC}"
         $KUBECTL logs -n "$NAMESPACE" "$pod_name" --tail="$lines"
-        echo ""
+echo ""
     done
 }
 
@@ -601,7 +601,7 @@ cmd_uninstall() {
     else
         echo -e "${YELLOW}    PVC will be kept (data preserved)${NC}"
     fi
-    echo ""
+echo ""
     read -p "Are you sure? (yes/no): " confirm
     
     if [ "$confirm" != "yes" ]; then
@@ -624,7 +624,7 @@ cmd_uninstall() {
         print_warning "PVC kept (to delete manually: $KUBECTL delete pvc -n $NAMESPACE --all)"
     fi
     
-    echo ""
+echo ""
     print_success "StarRocks uninstalled"
 }
 
@@ -676,7 +676,7 @@ cmd_resize() {
         print_success "$pvc_name patched"
     done
     
-    echo ""
+echo ""
     print_warning "Note: Pod restart may be required for changes to take effect"
     echo -e "Run: ${CYAN}$KUBECTL delete pod -n $NAMESPACE -l app.kubernetes.io/component=$component${NC}"
 }
@@ -698,10 +698,10 @@ cmd_port_forward() {
     print_step "Starting port-forward for StarRocks services..."
     echo -e "${CYAN}MySQL:  localhost:9030 → $svc_name:9030${NC}"
     echo -e "${CYAN}Web UI: localhost:8030 → $svc_name:8030${NC}"
-    echo ""
+echo ""
     print_warning "Press Ctrl+C to stop port-forward"
-    echo ""
-    
+echo ""
+
     $KUBECTL port-forward -n "$NAMESPACE" svc/$svc_name 9030:9030 8030:8030
 }
 
