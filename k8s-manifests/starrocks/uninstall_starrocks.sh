@@ -16,7 +16,7 @@ fi
 set -e
 
 NAMESPACE="starrocks"
-RELEASE_NAME="starrocks"
+RELEASE_NAME="kube-starrocks"
 
 # Detect MicroK8s
 if command -v microk8s &> /dev/null; then

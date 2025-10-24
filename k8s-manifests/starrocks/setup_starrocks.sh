@@ -21,7 +21,7 @@ set -e
 
 # Configuration
 NAMESPACE="starrocks"
-RELEASE_NAME="starrocks"
+RELEASE_NAME="kube-starrocks"
 CHART="starrocks/kube-starrocks"
 VALUES_FILE="starrocks-values.yaml"
 STARROCKS_PORT="30030"
@@ -86,7 +86,7 @@ check_dependencies() {
 
 get_service_info() {
     # Проверяем реальное имя сервиса (может быть starrocks-fe-service или kube-starrocks-fe-service)
-    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep fe-service | head -1 | cut -d'/' -f2)
+    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep -E "(kube-starrocks-fe-service|starrocks-fe-service)" | head -1 | cut -d'/' -f2)
     
     if [ -z "$svc_name" ]; then
         echo "NotFound"
@@ -100,7 +100,7 @@ get_service_info() {
 
 start_port_forward() {
     print_step "Starting port-forward for MySQL connection..."
-    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep fe-service | head -1 | cut -d'/' -f2)
+    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep -E "(kube-starrocks-fe-service|starrocks-fe-service)" | head -1 | cut -d'/' -f2)
     $KUBECTL port-forward -n "$NAMESPACE" svc/$svc_name 9030:9030 &>/dev/null &
     local pf_pid=$!
     sleep 2
@@ -221,7 +221,7 @@ fi
     echo -e "${GREEN}StarRocks is ready!${NC}"
     
     # Show actual ClusterIP
-    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep fe-service | head -1 | cut -d'/' -f2)
+    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep -E "(kube-starrocks-fe-service|starrocks-fe-service)" | head -1 | cut -d'/' -f2)
     local cluster_ip=$($KUBECTL get svc "$svc_name" -n "$NAMESPACE" -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
     
     echo -e "${CYAN}ClusterIP:${NC}"
@@ -363,7 +363,7 @@ fi
 echo ""
 
     # Show connection info
-    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep fe-service | head -1 | cut -d'/' -f2)
+    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep -E "(kube-starrocks-fe-service|starrocks-fe-service)" | head -1 | cut -d'/' -f2)
     local cluster_ip=$($KUBECTL get svc "$svc_name" -n "$NAMESPACE" -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
     
     echo -e "${CYAN}Connection details:${NC}"
@@ -529,7 +529,7 @@ cmd_status() {
     
     # Connection info
     echo -e "${CYAN}🔗 Connection:${NC}"
-    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep fe-service | head -1 | cut -d'/' -f2)
+    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep -E "(kube-starrocks-fe-service|starrocks-fe-service)" | head -1 | cut -d'/' -f2)
     local svc_type=$($KUBECTL get svc "$svc_name" -n "$NAMESPACE" -o jsonpath='{.spec.type}' 2>/dev/null)
     local cluster_ip=$($KUBECTL get svc "$svc_name" -n "$NAMESPACE" -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
     
@@ -688,7 +688,7 @@ cmd_port_forward() {
     check_dependencies
     
     # Find FE service name
-    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep fe-service | head -1 | cut -d'/' -f2)
+    local svc_name=$($KUBECTL get svc -n "$NAMESPACE" -o name 2>/dev/null | grep -E "(kube-starrocks-fe-service|starrocks-fe-service)" | head -1 | cut -d'/' -f2)
     
     if [ -z "$svc_name" ]; then
         print_error "StarRocks FE service not found"

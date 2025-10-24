@@ -1,136 +1,277 @@
 # =================================================================
-# StarRocks Helm Values - ClusterIP + Dynamic PVC
-# =================================================================
-# Использование:
-#   helm install starrocks starrocks/kube-starrocks \
-#     -n starrocks -f starrocks-values.yaml
-#
-# Доступ снаружи кластера через port-forward:
-#   kubectl port-forward -n starrocks svc/starrocks-fe-service 9030:9030
-#   mysql -h 127.0.0.1 -P 9030 -u root -p
+# StarRocks Helm Values - HA (3 FE / 3 BE), NodePort, Persistent Volumes
+# Based on official quick start with Helm and Operator
+# Docs: https://docs.starrocks.io/docs/quick_start/helm/
+# Namespace: starrocks, Release: kube-starrocks
 # =================================================================
 
-# --- Общие настройки ---
+operator:
+  global:
+    rbac:
+      create: true
+      serviceAccount:
+        name: "starrocks"
+        annotations: {}
+        labels: {}
+
+  timeZone: Europe/Minsk
+  nameOverride: "kube-starrocks"
+
+  starrocksOperator:
+    enabled: true
+    annotations: {}
+    namespaceOverride: ""
+    image:
+      repository: starrocks/operator
+      tag: v1.11.3
+    imagePullPolicy: Always
+    replicaCount: 1
+    resources:
+      limits:
+        cpu: 500m
+        memory: 800Mi
+      requests:
+        cpu: 500m
+        memory: 400Mi
+    securityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+    imagePullSecrets: []
+    nodeSelector: {}
+    affinity: {}
+    tolerations: []
+    watchNamespace: ""
+    env: []
+    log:
+      - --zap-time-encoding=iso8601
+      - --zap-encoder=console
+    dnsDomainSuffix: "cluster.local"
+    volumeNameWithHash: true
+
 starrocks:
-  # Установка пароля для root пользователя
+  nameOverride: "kube-starrocks"
+
+  # Set root password using a Kubernetes Secret "starrocks-root-pass"
+  # Create it before install:
+  # kubectl create secret generic starrocks-root-pass \
+  #   -n starrocks --from-literal=password='g()()dpa$$word'
   initPassword:
     enabled: true
-    # Секрет должен быть создан заранее:
-    # kubectl create secret generic starrocks-root-pass \
-    #   --from-literal=password='YourStrongPassword123!' -n starrocks
+    isInstall: true
+    password: ""
     passwordSecret: starrocks-root-pass
+    host: kube-starrocks-fe-service.starrocks.svc.cluster.local
+    port: 9030
+    image: ""
+    annotations: {}
+    podAnnotations: {}
+    resources: {}
 
-  # --- Frontend (FE) Configuration ---
+  timeZone: Europe/Minsk
+
+  # Global cluster settings
+  starrocksCluster:
+    enabledBe: true
+    enabledCn: false
+    componentValues:
+      image:
+        tag: "4.0-latest"
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "2"
+
+  # Frontend (FE)
   starrocksFESpec:
-    # Высокая доступность - 3 реплики
     replicas: 3
-    
-    # Образ StarRocks FE
     image:
       repository: starrocks/fe-ubuntu
       tag: "4.0-latest"
-      #tag: "3.3-latest"  # Stable version, tested with operator v1.11.3
-    
-    # Ресурсы для FE
+    imagePullPolicy: IfNotPresent
+
+    # Use IP host type, no service dependency for startup
+    feEnvVars:
+      - name: HOST_TYPE
+        value: "IP"
+
+    # External access via NodePort for MySQL (9030) and HTTP UI (8030)
+    service:
+      type: "NodePort"
+      loadbalancerIP: ""
+      annotations: {}
+      labels: {}
+      ports:
+        - name: query
+          nodePort: 30030
+          containerPort: 9030
+        - name: http
+          nodePort: 30080
+          containerPort: 8030
+      loadBalancerSourceRanges: []
+
+    imagePullSecrets: []
+    serviceAccount: ""
+    nodeSelector: {}
+    podLabels: {}
+    hostAliases: []
+    schedulerName: ""
+    affinity: {}
+    tolerations: []
+    topologySpreadConstraints: []
+
     resources:
       requests:
-        cpu: 500m      # 0.5 CPU
-        memory: 2Gi    # 2 GB RAM
+        cpu: 2
+        memory: 4Gi
       limits:
-        cpu: 2         # 2 CPU
-        memory: 4Gi    # 4 GB RAM
-    
-    # Хранилище (динамические PVC через storageVolumes)
-    storageVolumes:
-      - name: fe-meta
-        storageClassName: "microk8s-hostpath"
-        storageSize: 20Gi
-        mountPath: /opt/starrocks/fe/meta
-      - name: fe-log
-        storageClassName: "microk8s-hostpath"
-        storageSize: 1Gi
-        mountPath: /opt/starrocks/fe/log
-      
-    # ClusterIP для доступа внутри кластера
-    service:
-      type: ClusterIP
-      clusterIP: 10.152.183.151  # Статический IP (закомментировано - может конфликтовать)
-      ports:
-        # MySQL протокол (query_port)
-        - name: query
-          port: 9030
-          containerPort: 9030
-        # HTTP API и Web UI
-        - name: http
-          port: 8030
-          containerPort: 8030
+        cpu: 4
+        memory: 8Gi
 
-  # --- Backend (BE) Configuration ---
+    storageSpec:
+      name: "fe"
+      storageClassName: "microk8s-hostpath"
+      storageSize: 20Gi
+      storageMountPath: ""
+      logStorageClassName: "microk8s-hostpath"
+      logStorageSize: 5Gi
+      logMountPath: ""
+
+    emptyDirs: []
+    hostPaths: []
+    persistentVolumeClaimRetentionPolicy: {}
+
+    config: |
+      LOG_DIR = ${STARROCKS_HOME}/log
+      DATE = "$(date +%Y%m%d-%H%M%S)"
+      JAVA_OPTS="-Dlog4j2.formatMsgNoLookups=true -Xmx4096m -XX:+UseG1GC -Xlog:gc*:${LOG_DIR}/fe.gc.log.$DATE:time"
+      http_port = 8030
+      rpc_port = 9020
+      query_port = 9030
+      edit_log_port = 9010
+      mysql_service_nio_enabled = true
+      sys_log_level = INFO
+      min_graceful_exit_time_second = 25
+
+    configyaml: {}
+    secrets: []
+    configMaps: []
+    terminationGracePeriodSeconds: 120
+    startupProbeFailureSeconds: 600
+    livenessProbeFailureSeconds: 30
+    readinessProbeFailureSeconds: 30
+    minReadySeconds: 30
+    podManagementPolicy: Parallel
+    lifecycle: {}
+    sidecars: []
+    sidecarsMap: {}
+    initContainers: []
+    maxUnavailablePods: 1
+    shareProcessNamespace: false
+
+  # Backend (BE)
   starrocksBeSpec:
-    # Высокая доступность - 3 реплики
     replicas: 3
-    
-    # Образ StarRocks BE
     image:
       repository: starrocks/be-ubuntu
       tag: "4.0-latest"
-      #tag: "3.3-latest"  # Must match FE version
-    
-    # Ресурсы для BE
+    imagePullPolicy: IfNotPresent
+
+    beEnvVars:
+      - name: HOST_TYPE
+        value: "IP"
+      - name: FE_SERVICE_NAME
+        value: kube-starrocks-fe-search.starrocks.svc.cluster.local
+
+    # Optional NodePort exposure for BE web/metrics ports
+    service:
+      type: "NodePort"
+      loadbalancerIP: ""
+      annotations: {}
+      labels: {}
+      ports:
+        - name: be
+          nodePort: 30060
+          containerPort: 9060
+        - name: webserver
+          nodePort: 30040
+          containerPort: 8040
+        - name: heartbeat
+          containerPort: 9050
+        - name: brpc
+          containerPort: 8060
+      loadBalancerSourceRanges: []
+
+    imagePullSecrets: []
+    nodeSelector: {}
+    podLabels: {}
+    hostAliases: []
+    schedulerName: ""
+    affinity: {}
+    tolerations: []
+    topologySpreadConstraints: []
+
     resources:
       requests:
-        cpu: 1         # 1 CPU
-        memory: 4Gi    # 4 GB RAM
+        cpu: 2
+        memory: 8Gi
       limits:
-        cpu: 4         # 4 CPU
-        memory: 8Gi    # 8 GB RAM
-    
-    # Хранилище (динамические PVC через storageVolumes)
-    storageVolumes:
-      - name: be-data
-        storageClassName: "microk8s-hostpath"
-        storageSize: 100Gi
-        mountPath: /opt/starrocks/be/storage
-      - name: be-log
-        storageClassName: "microk8s-hostpath"
-        storageSize: 1Gi
-        mountPath: /opt/starrocks/be/log
-    
-    # ClusterIP для доступа внутри кластера
-    service:
-      type: ClusterIP
-      clusterIP: 10.152.183.152  # Статический IP (закомментировано - может конфликтовать)
-      ports:
-        # BE порт для загрузки данных
-        - name: be
-          port: 9060
-          containerPort: 9060
-        # BE WebServer
-        - name: webserver
-          port: 8040
-          containerPort: 8040
-        # Heartbeat порт (internal)
-        - name: heartbeat
-          port: 9050
-          containerPort: 9050
-        # BRPC порт (internal)
-        - name: brpc
-          port: 8060
-          containerPort: 8060
+        cpu: 8
+        memory: 16Gi
 
-# --- Operator Configuration ---
-operator:
-  # Образ StarRocks оператора
-  image:
-    repository: starrocks/operator
-    tag: "latest"
-  
-  # Ресурсы для оператора
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
+    storageSpec:
+      name: "be"
+      storageClassName: "microk8s-hostpath"
+      storageSize: 500Gi
+      storageCount: 1
+      storageMountPath: ""
+      logStorageClassName: "microk8s-hostpath"
+      logStorageSize: 20Gi
+      logMountPath: ""
+      spillStorageClassName: ""
+      spillStorageSize: 0Gi
+      spillMountPath: ""
+
+    emptyDirs: []
+    hostPaths: []
+    persistentVolumeClaimRetentionPolicy: {}
+
+    config: |
+      be_port = 9060
+      webserver_port = 8040
+      heartbeat_service_port = 9050
+      brpc_port = 8060
+      sys_log_level = INFO
+      default_rowset_type = beta
+      # Increase timeout for BE registration with FE
+      heartbeat_interval_seconds = 5
+      heartbeat_timeout_seconds = 60
+
+    configyaml: {}
+    secrets: []
+    configMaps: []
+    terminationGracePeriodSeconds: 120
+    startupProbeFailureSeconds: 600
+    livenessProbeFailureSeconds: 30
+    readinessProbeFailureSeconds: 30
+    minReadySeconds: 30
+    podManagementPolicy: Parallel
+    lifecycle: {}
+    sidecars: []
+    sidecarsMap: {}
+    initContainers: []
+    maxUnavailablePods: 1
+    shareProcessNamespace: false
+
+  # CN disabled
+  starrocksCnSpec:
+    replicas: 0
+
+  # FE Proxy disabled when using NodePort
+  starrocksFeProxySpec:
+    enabled: false
+
+  secrets: []
+  configMaps: []
+  resources: []
 
